@@ -31,35 +31,62 @@ const ASCIIHeader = `
 ʕつ•ᴥ•ʔつ Automate Git operations with AI
 `
 
+/* =======================================
+   =============   LOGGING   =============
+   ======================================= */
+
+// Prints debug messages (only when verbose == true)
+func logDebug(msg string) {
+	if verbose {
+		color.New(color.FgMagenta).Fprintf(os.Stderr, "🔬 %s\n", msg)
+	}
+}
+
+// General-purpose log with caller-defined color and emoji
+func logMessage(c color.Attribute, emoji, msg string) {
+	color.New(c).Fprintf(os.Stderr, "%s %s\n", emoji, msg)
+}
+
+// Error logs in red
+func logError(msg string) {
+	color.New(color.FgRed).Fprintf(os.Stderr, "❌ %s\n", msg)
+}
+
+/* ---------- AI PROMPTS ---------- */
+
+// System-level instructions
 const systemPrompt = `
 You are an expert software developer who helps generate concise, high-quality
 Git-related messages. Provide brief, clear outputs with an imperative mood.
-Avoid disclaimers and references to yourself or your system role.
-Focus on clarity, correctness, and best practices.
+Avoid disclaimers, personal references, or mention of AI.
+Stay consistent with the style across this repository.
 `
 
+// Pull Request title instructions
 const prTitleFormattingInstructions = `
-As an expert software developer, generate a clear pull request title based on my changes
-Requirements:
+As an expert software developer, generate a clear pull request title. Requirements:
 - If JIRA ticket number is provided, place it at the start in brackets
 - Summarize the main purpose
 - Keep under 140 characters
 - Use imperative mood
 - Do not end with a period
 - Must be a complete thought
+- Maintain consistency across all PR titles
+- Do not add disclaimers or AI references
+- Keep style aligned with repository standards
 
 OUTPUT FORMAT:
 [<ticket number>] <pull request title>
 `
 
+// Pull Request body instructions
 const prBodyFormattingInstructions = `
-As an expert software developer, write a simple summary based on changes in this branch based on the following title, branch name, commit messages and diffs.
-Requirements:
-- Summarize the main purpose in a few sentences
-- Use imperative mood
+As an expert software developer, write a concise Pull Request body. Requirements:
+- Summarize the main purpose in a few sentences, imperative mood
 - Include a bullet list of key changes
 - If a JIRA ticket is present, link it under "Ticket links"
 - Keep sentences short
+- Maintain style consistency: do not add disclaimers or AI references
 
 OUTPUT FORMAT:
 ### Description
@@ -72,33 +99,96 @@ OUTPUT FORMAT:
 * [JIRA-0000]
 `
 
+// Commit message instructions
 const commitFormattingInstructions = `
 As an expert developer, generate a Git commit message following Conventional Commits:
 Requirements:
-- Start with a gitmoji
-- Output exactly one line
-- Keep the entire line under 80 characters
+
+- Must use exactly one of the allowed Gitmojis from this set:
+🎨 for "Improve structure / format of the code."
+⚡️ for "Improve performance"
+🔥 for "Remove code or files"
+🐛 for "Fix a bug"
+🚑️ for "Critical hotfix"
+✨ for "Introduce new features"
+📝 for "Add or update documentation"
+🚀 for "Deploy stuff"
+💄 for "Add or update the UI and style files"
+🎉 for "Begin a project"
+✅ for "Add, update, or pass tests"
+🔒️ for "Fix security or privacy issues"
+🔐 for "Add or update secrets"
+🔖 for "Release / Version tags"
+🚨 for "Fix compiler / linter warnings"
+🚧 for "Work in progress"
+💚 for "Fix CI Build"
+⬇️ for "Downgrade dependencies"
+⬆️ for "Upgrade dependencies"
+📌 for "Pin dependencies to specific versions"
+👷 for "Add or update CI build system"
+📈 for "Add or update analytics or track code"
+♻️ for "Refactor code"
+➕ for "Add a dependency"
+➖ for "Remove a dependency"
+🔧 for "Add or update configuration files"
+🔨 for "Add or update development scripts"
+🌐 for "Internationalization and localization"
+✏️ for "Fix typos"
+💩 for "Write bad code that needs to be improved"
+⏪️ for "Revert changes"
+🔀 for "Merge branches"
+📦️ for "Add or update compiled files or packages"
+👽️ for "Update code due to external API changes"
+🚚 for "Move or rename resources (e.g.: files, paths, routes)."
+💥 for "Introduce breaking changes"
+🍱 for "Add or update assets"
+♿️ for "Improve accessibility"
+💡 for "Add or update comments in source code"
+🍻 for "Write code drunkenly"
+💬 for "Add or update text and literals"
+🗃️ for "Perform database related changes"
+🔊 for "Add or update logs"
+🔇 for "Remove logs"
+👥 for "Add or update contributor(s)"
+🚸 for "Improve user experience / usability"
+🏗️ for "Make architectural changes"
+📱 for "Work on responsive design"
+🤡 for "Mock things"
+🥚 for "Add or update an easter egg"
+🙈 for "Add or update a .gitignore file"
+📸 for "Add or update snapshots"
+⚗️ for "Perform experiments"
+🔍️ for "Improve SEO"
+🏷️ for "Add or update types"
+🌱 for "Add or update seed files"
+🚩 for "Add, update, or remove feature flags"
+🥅 for "Catch errors"
+💫 for "Add or update animations and transitions"
+🗑️ for "Deprecate code that needs to be cleaned up"
+🛂 for "Work on code related to authorization, roles and permissions"
+🩹 for "Simple fix for a non-critical issue"
+🧐 for "Data exploration/inspection"
+⚰️ for "Remove dead code"
+🧪 for "Add a failing test"
+👔 for "Add or update business logic"
+🩺 for "Add or update healthcheck"
+🧱 for "Infrastructure related changes"
+🧑‍💻 for "Improve developer experience"
+💸 for "Add sponsorships or money related infrastructure"
+🧵 for "Add or update code related to multithreading or concurrency"
+🦺 for "Add or update code related to validation"
+
+- Use the format: <gitmoji> [type]: <description>
+- The entire line must stay under 80 characters
 - Use imperative mood (e.g., "add" not "added")
 - Do not end with a period
-- Format: <gitmoji> [type]: <description>
-- If multiple changes exist, condense them into a single descriptive line
-- Output a single commit message only
+- Condense multiple changes into a single descriptive line if needed
+- Do not add disclaimers or references to yourself or AI
+- Output exactly one line
 
 OUTPUT FORMAT:
 <gitmoji> [type]: <description>
 `
-
-func buildInputData(ticketNumber string, branchName string, prTitle string, commits string, diff string) string {
-	return fmt.Sprintf(`INPUT:
-		TICKET NUMBER: %s
-		BRANCH NAME:   %s
-		PULL REQUEST TITLE: %s
-		COMMIT MESSAGES LIST:
-		%s
-		GIT DIFFERENCE TO HEAD:
-		%s
-  `, ticketNumber, branchName, prTitle, commits, diff)
-}
 
 /* =======================================
    ==============  GLOBALS   =============
@@ -112,24 +202,7 @@ var (
 	openAITemperature float64
 )
 
-/* =======================================
-   ===========  LOGGING & ERRORS =========
-   ======================================= */
-
-// Minimal logging with a single function for color + emoji.
-func logMsg(c color.Attribute, emoji, text string) {
-	color.New(c).Fprintf(os.Stderr, "%s %s\n", emoji, text)
-}
-
-// For debug logs
-func logDebug(msg string) {
-	if !verbose {
-		return
-	}
-	color.New(color.FgYellow, color.Bold).Fprintf(os.Stderr, "🐛 DEBUG: %s\n", msg)
-}
-
-// Custom error type
+// Simple custom error
 type GitAIException struct{ msg string }
 
 func (e GitAIException) Error() string { return e.msg }
@@ -142,22 +215,27 @@ type GitOperations struct{}
 
 func (g *GitOperations) GetDiff(staged bool) (string, error) {
 	if staged {
+		logDebug("Fetching staged diff (git diff --cached)")
 		return runCmd("git", "diff", "--cached")
 	}
+	logDebug("Fetching unstaged diff (git diff)")
 	return runCmd("git", "diff")
 }
 
 func (g *GitOperations) StageAllChanges() error {
+	logDebug("Staging all changes (git add .)")
 	_, err := runCmd("git", "add", ".")
 	return err
 }
 
 func (g *GitOperations) GetCurrentBranch() (string, error) {
+	logDebug("Getting current branch (git rev-parse --abbrev-ref HEAD)")
 	out, err := runCmd("git", "rev-parse", "--abbrev-ref", "HEAD")
 	return strings.TrimSpace(out), err
 }
 
 func (g *GitOperations) GetCommitMessages(mBranch, currentBranch string) (string, error) {
+	logDebug(fmt.Sprintf("Getting commit messages between origin/%s..%s", mBranch, currentBranch))
 	return runCmd("git", "log",
 		fmt.Sprintf("origin/%s..%s", mBranch, currentBranch),
 		"--pretty=format:%s",
@@ -165,6 +243,7 @@ func (g *GitOperations) GetCommitMessages(mBranch, currentBranch string) (string
 }
 
 func (g *GitOperations) GetLastCommitMessage() (string, error) {
+	logDebug("Getting last commit message (git log -1 --pretty=format:%s)")
 	out, err := runCmd("git", "log", "-1", "--pretty=format:%s")
 	return strings.TrimSpace(out), err
 }
@@ -183,6 +262,7 @@ type GitAI struct {
    ======================================= */
 
 func runCmd(name string, args ...string) (string, error) {
+	logDebug(fmt.Sprintf("Running command: %s %v", name, args))
 	cmd := exec.Command(name, args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -199,25 +279,36 @@ func performWithSpinner(desc string, fn func() (string, error)) (string, error) 
 }
 
 func executeCommandWithCheck(name string, args ...string) {
-	logDebug(fmt.Sprintf("Running command: %s %v", name, args))
+	logDebug(fmt.Sprintf("executeCommandWithCheck: %s %v", name, args))
 	out, err := runCmd(name, args...)
 	if err != nil {
-		logMsg(color.FgRed, "❌", fmt.Sprintf("Command failed: %s\nOutput: %s", err, out))
+		logError(fmt.Sprintf("Command failed: %s\nOutput: %s", err, out))
 		os.Exit(1)
 	}
+}
+
+func buildInputData(ticketNumber, branchName, prTitle, commits, diff string) string {
+	input := fmt.Sprintf(`INPUT:
+TICKET NUMBER: %s
+BRANCH NAME:   %s
+PULL REQUEST TITLE: %s
+COMMIT MESSAGES LIST:
+%s
+GIT DIFFERENCE TO HEAD:
+%s
+`, ticketNumber, branchName, prTitle, commits, diff)
+	return input
 }
 
 /* =======================================
    ===========  GitAI METHODS  ===========
    ======================================= */
 
-// GenerateMessage calls the OpenAI API to get a response for a given prompt.
 func (g *GitAI) GenerateMessage(systemInstructions, userInstructions, inputData string) (string, error) {
-	if verbose {
-		logDebug("System instructions:\n" + systemInstructions)
-		logDebug("User instructions:\n" + userInstructions)
-		logDebug("User data:\n" + inputData)
-	}
+	logDebug("Preparing OpenAI request")
+	logDebug(fmt.Sprintf("System instructions:\n%s", systemInstructions))
+	logDebug(fmt.Sprintf("User instructions:\n%s", userInstructions))
+	logDebug(fmt.Sprintf("User data:\n%s", inputData))
 
 	var resp openai.ChatCompletionResponse
 	_, err := performWithSpinner("🤖 Generating AI message", func() (string, error) {
@@ -228,18 +319,9 @@ func (g *GitAI) GenerateMessage(systemInstructions, userInstructions, inputData 
 				MaxTokens:   openAIMaxTokens,
 				Temperature: float32(openAITemperature),
 				Messages: []openai.ChatCompletionMessage{
-					{
-						Role:    openai.ChatMessageRoleSystem,
-						Content: systemInstructions,
-					},
-					{
-						Role:    openai.ChatMessageRoleUser,
-						Content: userInstructions,
-					},
-					{
-						Role:    openai.ChatMessageRoleUser,
-						Content: inputData,
-					},
+					{Role: openai.ChatMessageRoleSystem, Content: systemInstructions},
+					{Role: openai.ChatMessageRoleUser, Content: userInstructions},
+					{Role: openai.ChatMessageRoleUser, Content: inputData},
 				},
 			},
 		)
@@ -251,19 +333,25 @@ func (g *GitAI) GenerateMessage(systemInstructions, userInstructions, inputData 
 	})
 
 	if err != nil {
+		logError(fmt.Sprintf("OpenAI API request failed: %s", err.Error()))
 		return "", GitAIException{"OpenAI API request failed: " + err.Error()}
 	}
 	if len(resp.Choices) == 0 {
-		return "", GitAIException{"Received empty message from GPT"}
+		logError("Received empty message from OpenAI")
+		return "", GitAIException{"No response from GPT"}
 	}
+
+	logDebug("AI message generated successfully")
 	return resp.Choices[0].Message.Content, nil
 }
 
-// editContentWithVim opens the user's text editor to confirm or modify AI output.
+// Opens Vim for user to edit generated content
 func (g *GitAI) editContentWithVim(initialContent string) (string, bool) {
+	logDebug("Creating a temp file for user edit")
+
 	tmpFile, err := os.CreateTemp("", "gai-*.txt")
 	if err != nil {
-		logMsg(color.FgRed, "❌", "Failed to create temp file: "+err.Error())
+		logError(fmt.Sprintf("Failed to create temp file: %s", err.Error()))
 		return "", false
 	}
 	defer os.Remove(tmpFile.Name())
@@ -274,53 +362,52 @@ func (g *GitAI) editContentWithVim(initialContent string) (string, bool) {
 	stat, _ := os.Stat(tmpFile.Name())
 	origModTime := stat.ModTime()
 
+	logMessage(color.FgBlue, "✍️", "Opening Vim editor for final review...")
 	cmd := exec.Command("vim", tmpFile.Name())
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logMsg(color.FgRed, "❌", "Failed to launch vim editor: "+err.Error())
+		logError(fmt.Sprintf("Failed to launch Vim: %s", err.Error()))
 		return "", false
 	}
 
 	finalBytes, err := os.ReadFile(tmpFile.Name())
 	if err != nil {
-		logMsg(color.FgRed, "❌", "Failed to read updated file: "+err.Error())
+		logError(fmt.Sprintf("Failed to read updated file: %s", err.Error()))
 		return "", false
 	}
 	finalContent := string(finalBytes)
-	fmt.Print("\n" + finalContent + "\n\n")
 
 	statAfter, _ := os.Stat(tmpFile.Name())
 	if statAfter.ModTime().Equal(origModTime) || strings.TrimSpace(finalContent) == "" {
+		logMessage(color.FgYellow, "⚠️", "No changes saved in the editor")
 		return finalContent, false
 	}
+
+	logDebug("User saved new content. Displaying below.")
+	fmt.Println()
+	color.New(color.Bold).Println(finalContent) // Bold the user-edited content
+	fmt.Println()
+
 	return finalContent, true
 }
 
-/* =======================================
-   ============    ACTIONS    ============
-   ======================================= */
+/* ==========  ACTIONS  ========== */
 
-// Generate a diff-based AI message using the given template.
 func (g *GitAI) generateDiffBasedMessage(staged bool) (string, bool) {
+	logDebug("Gathering diff for AI-based commit message")
 	diff, _ := g.gitOps.GetDiff(staged)
-
-	// userData might be your actual diff or a combined string with context
 	userData := buildInputData("", "", "", "", diff)
 
-	aiOutput, err := g.GenerateMessage(
-		systemPrompt,
-		commitFormattingInstructions,
-		userData,
-	)
+	logDebug("Generating commit message with AI based on diff")
+	aiOutput, err := g.GenerateMessage(systemPrompt, commitFormattingInstructions, userData)
 	if err != nil {
-		logMsg(color.FgRed, "❌", "OpenAI error: "+err.Error())
+		logError(fmt.Sprintf("OpenAI error: %s", err.Error()))
 		return "", false
 	}
 
-	// Only take the first line from the AI output...
-	// firstLine := strings.SplitN(aiOutput, "\n", 2)[0]
+	logMessage(color.FgBlue, "🔎", "Review AI-generated commit message (Vim will open)...")
 	edited, saved := g.editContentWithVim(aiOutput)
 	if !saved {
 		return "", false
@@ -331,22 +418,22 @@ func (g *GitAI) generateDiffBasedMessage(staged bool) (string, bool) {
 /* ==========  COMMIT  ========== */
 
 func (g *GitAI) Commit(amend bool) {
-	logMsg(color.FgBlue, "📝", "Preparing commit...")
-
+	logMessage(color.FgBlue, "📢", "Starting commit process...")
 	if err := g.stageChangesIfNeeded(); err != nil {
 		return
 	}
 	if amend {
 		if msg, err := g.gitOps.GetLastCommitMessage(); err == nil {
-			logMsg(color.FgCyan, "💡", "Amending commit: "+msg)
+			logMessage(color.FgCyan, "ℹ️", fmt.Sprintf("Amending last commit: %s", msg))
 		}
 	}
 
 	finalMessage, ok := g.generateDiffBasedMessage(true)
 	if !ok {
-		logMsg(color.FgYellow, "⚠️", "Commit canceled.")
+		logMessage(color.FgYellow, "🚫", "Commit canceled by user.")
 		return
 	}
+	logDebug("Committing changes with final message")
 	g.executeCommit(finalMessage, amend)
 	g.showGitStatusAfter("Commit")
 }
@@ -354,12 +441,12 @@ func (g *GitAI) Commit(amend bool) {
 func (g *GitAI) stageChangesIfNeeded() error {
 	diff, _ := g.gitOps.GetDiff(true)
 	if strings.TrimSpace(diff) != "" {
-		logMsg(color.FgBlue, "🔎", "Changes already staged.")
+		logMessage(color.FgBlue, "🎁", "Changes already staged.")
 		return nil
 	}
-	logMsg(color.FgBlue, "🌱", "No changes staged. Automatically staging all...")
+	logMessage(color.FgCyan, "🎁", "No changes staged. Automatically staging all...")
 	if err := g.gitOps.StageAllChanges(); err != nil {
-		logMsg(color.FgRed, "❌", "Failed to stage changes: "+err.Error())
+		logError(fmt.Sprintf("Failed to stage changes: %s", err.Error()))
 		return err
 	}
 	return nil
@@ -374,56 +461,56 @@ func (g *GitAI) executeCommit(finalMessage string, amend bool) {
 
 	out, err := runCmd("git", args...)
 	if err != nil {
-		logMsg(color.FgRed, "❌", fmt.Sprintf("Failed to commit changes: %v\nOutput: %s", err, out))
+		logError(fmt.Sprintf("Failed to commit changes: %v\nOutput: %s", err, out))
 		os.Exit(1)
 	}
-	logMsg(color.FgGreen, "🎉", "Changes committed successfully!")
+	logMessage(color.FgGreen, "🎉", "Changes committed successfully!")
 }
 
 func (g *GitAI) showGitStatusAfter(action string) {
-	logMsg(color.FgBlue, "🔎", fmt.Sprintf("Showing Git status after %s:", action))
+	logMessage(color.FgBlue, "📢", fmt.Sprintf("Showing Git status after %s:", action))
 	executeCommandWithCheck("git", "status")
 }
 
 /* ==========  STASH  ========== */
 
 func (g *GitAI) Stash() {
-	logMsg(color.FgBlue, "🗄", "Collecting changes for stash...")
+	logMessage(color.FgBlue, "📢", "Stashing changes with AI message...")
 	message, ok := g.generateDiffBasedMessage(false)
 	if !ok {
-		logMsg(color.FgYellow, "⚠️", "Stash operation canceled (no save).")
+		logMessage(color.FgYellow, "🚫", "Stash canceled by user.")
 		return
 	}
 	out, err := runCmd("git", "stash", "push", "-m", message)
 	if err != nil {
-		logMsg(color.FgRed, "❌", "Failed to stash changes: "+err.Error()+"\nOutput: "+out)
+		logError(fmt.Sprintf("Failed to stash changes: %s\nOutput: %s", err.Error(), out))
 		os.Exit(1)
 	}
-	logMsg(color.FgGreen, "📦", "Changes stashed successfully!")
+	logMessage(color.FgGreen, "🎉", "Changes stashed successfully!")
 }
 
 /* ==========  PUSH & PR  ========== */
 
 func (g *GitAI) Push() {
-	logMsg(color.FgBlue, "🚀", "Pushing changes...")
+	logMessage(color.FgBlue, "🌐", "Pushing changes to remote...")
 
 	currentBranch, err := g.gitOps.GetCurrentBranch()
 	if err != nil {
-		logMsg(color.FgRed, "❌", "Could not get current branch: "+err.Error())
+		logError(fmt.Sprintf("Could not get current branch: %s", err.Error()))
 		return
 	}
+	logDebug(fmt.Sprintf("Current branch: %s", currentBranch))
 
-	// Push changes as before
 	if err := g.pushChanges(currentBranch); err != nil {
-		logMsg(color.FgRed, "❌", err.Error())
+		logError(err.Error())
 		return
 	}
 	g.showGitStatusAfter("Push")
 
-	// Check for existing PR
+	logDebug("Checking for existing PR...")
 	prNumber, err := g.getExistingPRNumber(currentBranch)
 	if err != nil {
-		logMsg(color.FgRed, "❌", err.Error())
+		logError(err.Error())
 		return
 	}
 
@@ -432,46 +519,42 @@ func (g *GitAI) Push() {
 	ticketNumber := g.detectTicketNumber(currentBranch)
 
 	if prNumber != "" {
-		// Update existing PR body
-		logMsg(color.FgBlue, "⚙️", fmt.Sprintf("Pull request #%s already exists", prNumber))
+		logMessage(color.FgCyan, "📝", fmt.Sprintf("Pull request #%s found. Updating body...", prNumber))
 		if err := g.updatePRBody(prNumber, currentBranch, commitMsgs, diff, ticketNumber); err != nil {
-			logMsg(color.FgRed, "❌", err.Error())
+			logError(err.Error())
 			return
 		}
 	} else {
-		// Create a new PR
+		logMessage(color.FgBlue, "🚀", "No existing PR found. Creating new PR...")
 		g.createNewPR(currentBranch, commitMsgs, diff, ticketNumber)
-
-		// After creation, fetch the new PR number
 		prNumber, _ = g.getExistingPRNumber(currentBranch)
 	}
 
-	// Automatically open PR in browser
 	g.openPRInBrowser(prNumber)
 }
 
 func (g *GitAI) pushChanges(branch string) error {
-	logMsg(color.FgBlue, "🔄", "Fetching latest changes from origin...")
-	_, err := performWithSpinner("📡 Fetching from origin", func() (string, error) {
+	logMessage(color.FgBlue, "🔎", "Fetching latest from origin...")
+	_, err := performWithSpinner("🛰️ Fetching from origin", func() (string, error) {
 		return runCmd("git", "fetch", "origin", mainBranch)
 	})
 	if err != nil {
 		return fmt.Errorf("Failed to fetch from origin: %w", err)
 	}
 
-	logMsg(color.FgBlue, "🔼", "Pushing changes to remote...")
+	logMessage(color.FgBlue, "🌐", "Pushing changes...")
 	pushOutput, pushErr := performWithSpinner("🚀 Pushing changes", func() (string, error) {
 		return runCmd("git", "push", "--set-upstream", "origin", branch)
 	})
 	if pushErr != nil {
 		return fmt.Errorf("Failed to push changes:\n%s", pushOutput)
 	}
-	logMsg(color.FgGreen, "🎉", "Changes pushed successfully!")
+	logMessage(color.FgGreen, "🎉", "Changes pushed successfully!")
 	return nil
 }
 
-// getExistingPRNumber retrieves the PR number if it exists for the current branch.
 func (g *GitAI) getExistingPRNumber(branch string) (string, error) {
+	logDebug(fmt.Sprintf("Listing PRs for branch %s", branch))
 	out, err := runCmd("gh", "pr", "list", "--head", branch, "--json", "number")
 	if err != nil {
 		return "", fmt.Errorf("failed to check existing PRs: %w\n%s", err, out)
@@ -479,56 +562,50 @@ func (g *GitAI) getExistingPRNumber(branch string) (string, error) {
 	var prList []struct {
 		Number int `json:"number"`
 	}
-	if err := json.Unmarshal([]byte(out), &prList); err != nil {
-		return "", fmt.Errorf("failed to parse PR list JSON: %w", err)
+	if e := json.Unmarshal([]byte(out), &prList); e != nil {
+		return "", fmt.Errorf("failed to parse PR list JSON: %w", e)
 	}
 	if len(prList) > 0 {
-		// Return the first match (usually there's only one open PR per branch)
 		return fmt.Sprintf("%d", prList[0].Number), nil
 	}
 	return "", nil
 }
 
-// updatePRBody updates the body of an existing PR
 func (g *GitAI) updatePRBody(prNumber, branch, commitMsgs, diff, ticketNumber string) error {
-	logMsg(color.FgBlue, "⚙️", "Updating existing Pull Request body with AI assistance...")
-
-	// Next, build body data
+	logDebug("Building input data for PR body update")
 	prBodyInput := buildInputData(ticketNumber, branch, "", commitMsgs, diff)
 
-	// Generate the PR body with the new method
-	prBodyAI, err := g.GenerateMessage(
-		systemPrompt,                 // system-level instructions
-		prBodyFormattingInstructions, // user instructions for body
-		prBodyInput,                  // the actual data
-	)
+	logDebug("Generating new PR body with AI")
+	prBodyAI, err := g.GenerateMessage(systemPrompt, prBodyFormattingInstructions, prBodyInput)
 	if err != nil {
 		return fmt.Errorf("failed generating PR body: %w", err)
 	}
 
 	editedBody, savedBody := g.editContentWithVim(prBodyAI)
 	if !savedBody {
-		return fmt.Errorf("PR update canceled by user")
+		return fmt.Errorf("PR update canceled")
 	}
 
-	logMsg(color.FgBlue, "🏗️", "Editing Pull Request on GitHub...")
+	logMessage(color.FgBlue, "📢", "Updating PR on GitHub...")
 	out, createErr := runCmd("gh", "pr", "edit", prNumber, "--body", editedBody)
 	if createErr != nil {
 		return fmt.Errorf("failed to update PR: %w\nOutput: %s", createErr, out)
 	}
-	logMsg(color.FgGreen, "🎉", "Pull Request updated successfully!")
+	logMessage(color.FgGreen, "🎉", "Pull Request updated successfully!")
 	return nil
 }
 
 func (g *GitAI) openPRInBrowser(prNumber string) {
 	if prNumber == "" {
+		logMessage(color.FgYellow, "⚠️", "No PR number to open in browser.")
 		return
 	}
-	// Opens the PR in the default browser
+	logMessage(color.FgCyan, "🌐", "Opening PR in browser...")
 	_, _ = runCmd("gh", "pr", "view", prNumber, "--web")
 }
 
 func (g *GitAI) detectTicketNumber(branch string) string {
+	logDebug(fmt.Sprintf("Detecting JIRA ticket pattern in branch name: %s", branch))
 	re := regexp.MustCompile(`[A-Z]+-\d+`)
 	match := re.FindString(branch)
 	if match != "" {
@@ -538,67 +615,52 @@ func (g *GitAI) detectTicketNumber(branch string) string {
 }
 
 func (g *GitAI) createNewPR(branch, commitMsgs, diff, ticketNumber string) {
-	// Build the user data for PR title
+	logDebug("Generating PR title")
 	prTitleInput := buildInputData(ticketNumber, branch, "", commitMsgs, diff)
 
-	// Call your updated GenerateMessage
-	prTitleAI, err := g.GenerateMessage(
-		systemPrompt,                  // system-level instructions
-		prTitleFormattingInstructions, // user instructions for title
-		prTitleInput,                  // the actual data
-	)
+	prTitleAI, err := g.GenerateMessage(systemPrompt, prTitleFormattingInstructions, prTitleInput)
 	if err != nil {
-		logMsg(color.FgRed, "❌", "Failed to generate PR title: "+err.Error())
+		logError(fmt.Sprintf("Failed to generate PR title: %s", err.Error()))
 		return
 	}
-
-	// Take only the first line if needed
 	firstLine := strings.SplitN(prTitleAI, "\n", 2)[0]
-
 	if ticketNumber == "NO-TICKET" {
 		firstLine = strings.TrimPrefix(firstLine, "[NO-TICKET] ")
 	}
 
 	editedTitle, savedTitle := g.editContentWithVim(firstLine)
 	if !savedTitle {
-		logMsg(color.FgYellow, "⚠️", "PR creation canceled (no save on title).")
+		logMessage(color.FgYellow, "🚫", "PR creation canceled (no save on title).")
 		return
 	}
 
-	// Next, build body data
+	logDebug("Generating PR body")
 	prBodyInput := buildInputData(ticketNumber, branch, editedTitle, commitMsgs, diff)
-
-	// Generate the PR body with the new method
-	prBodyAI, err := g.GenerateMessage(
-		systemPrompt,                 // system-level instructions
-		prBodyFormattingInstructions, // user instructions for body
-		prBodyInput,                  // the actual data
-	)
+	prBodyAI, err := g.GenerateMessage(systemPrompt, prBodyFormattingInstructions, prBodyInput)
 	if err != nil {
-		logMsg(color.FgRed, "❌", "Failed to generate PR body: "+err.Error())
+		logError(fmt.Sprintf("Failed to generate PR body: %s", err.Error()))
 		return
 	}
 
-	// Let user edit the AI-generated body
 	editedBody, savedBody := g.editContentWithVim(prBodyAI)
 	if !savedBody {
-		logMsg(color.FgYellow, "⚠️", "PR creation canceled (no save on body).")
+		logMessage(color.FgYellow, "🚫", "PR creation canceled (no save on body).")
 		return
 	}
 
-	logMsg(color.FgBlue, "🏗️", "Creating draft Pull Request on GitHub...")
+	logMessage(color.FgBlue, "📢", "Creating a draft Pull Request on GitHub...")
 	out, createErr := runCmd("gh", "pr", "create", "--draft", "--title", editedTitle, "--body", editedBody)
 	if createErr != nil {
-		logMsg(color.FgRed, "❌", "Failed to create PR: "+createErr.Error()+"\nOutput: "+out)
+		logError(fmt.Sprintf("Failed to create PR: %s\nOutput: %s", createErr.Error(), out))
 		return
 	}
-	logMsg(color.FgGreen, "🎉", "Pull Request created successfully!")
+	logMessage(color.FgGreen, "🎉", "Pull Request created successfully!")
 }
 
 /* ==========  SHOW STATUS  ========== */
 
 func (g *GitAI) ShowStatus() {
-	logMsg(color.FgBlue, "🔍", "Git Status:")
+	logMessage(color.FgBlue, "🔎", "Git Status:")
 	executeCommandWithCheck("git", "status")
 }
 
@@ -627,7 +689,7 @@ var commitCmd = &cobra.Command{
 
 var pushCmd = &cobra.Command{
 	Use:   "push",
-	Short: "Push changes and create a PR",
+	Short: "Push changes and create/update a PR",
 	Run: func(cmd *cobra.Command, args []string) {
 		g := mustNewGitAI()
 		g.Push()
@@ -667,10 +729,10 @@ func init() {
 func initConfig() {
 	viper.AutomaticEnv()
 
-	// Defaults
+	// Default configuration
 	viper.SetDefault("OPENAI_MODEL", "gpt-4o-mini")
 	viper.SetDefault("OPENAI_MAX_TOKENS", 16384)
-	viper.SetDefault("OPENAI_TEMPERATURE", 1)
+	viper.SetDefault("OPENAI_TEMPERATURE", 1.0)
 	viper.SetDefault("MAIN_BRANCH", "main")
 	viper.SetDefault("VERBOSE", false)
 
@@ -684,13 +746,13 @@ func initConfig() {
 func mustNewGitAI() *GitAI {
 	apiKey := viper.GetString("OPENAI_API_KEY")
 	if apiKey == "" {
-		logMsg(color.FgRed, "❌", "OPENAI_API_KEY environment variable not set")
+		logError("OPENAI_API_KEY environment variable not set")
 		os.Exit(1)
 	}
 	client := openai.NewClient(apiKey)
 
 	if err := checkRequirements(); err != nil {
-		logMsg(color.FgRed, "❌", err.Error())
+		logError(err.Error())
 		os.Exit(1)
 	}
 	return &GitAI{
@@ -699,43 +761,38 @@ func mustNewGitAI() *GitAI {
 	}
 }
 
-// checkRequirements ensures git + gh exist, user is authenticated, and has repo perms.
 func checkRequirements() error {
-	logMsg(color.FgBlue, "🔍", "Checking system requirements...")
+	logMessage(color.FgBlue, "🔎", "Checking system requirements...")
 
-	// check 'git'
 	if _, err := exec.LookPath("git"); err != nil {
 		return GitAIException{"Git not in PATH"}
 	}
-
-	// check 'gh'
 	if _, err := exec.LookPath("gh"); err != nil {
 		return GitAIException{"GitHub CLI not in PATH"}
 	}
 
-	// check gh auth
 	out, err := runCmd("gh", "auth", "status")
 	if err != nil {
 		logDebug(out)
 		return GitAIException{"GitHub CLI not authenticated"}
 	}
 
-	// check user permission on current repo
 	if err := checkRepoPermissions(); err != nil {
 		return err
 	}
 
-	logMsg(color.FgGreen, "⚙️", "All requirements satisfied!")
+	logMessage(color.FgGreen, "👍", "All requirements satisfied!")
 	return nil
 }
 
-// checkRepoPermissions ensures the user has write/maintain/admin on this repo.
 func checkRepoPermissions() error {
+	logDebug("Checking repo permissions via gh CLI")
 	out, err := runCmd("gh", "repo", "view", "--json", "viewerPermission")
 	if err != nil {
 		logDebug(out)
-		return GitAIException{"Cannot check repository permissions. Possibly no permissions."}
+		return GitAIException{"Cannot check repository permissions."}
 	}
+
 	var resp struct {
 		ViewerPermission string `json:"viewerPermission"`
 	}
@@ -745,17 +802,16 @@ func checkRepoPermissions() error {
 
 	switch resp.ViewerPermission {
 	case "ADMIN", "MAINTAIN", "WRITE":
-		// valid
+		return nil
 	default:
 		return GitAIException{
 			"You do not have write permissions to this repository. Permission: " + resp.ViewerPermission,
 		}
 	}
-	return nil
 }
 
 func main() {
-	logMsg(color.FgMagenta, "", ASCIIHeader)
+	color.New(color.FgMagenta).Printf("%s\n", ASCIIHeader)
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
