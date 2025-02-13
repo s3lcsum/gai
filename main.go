@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,7 +57,6 @@ func logError(msg string) {
 
 /* ---------- AI PROMPTS ---------- */
 
-// System-level instructions
 const defaultSystemInstructions = `
 You are an expert software developer who helps generate concise, high-quality
 Git-related messages. Provide brief, clear outputs with an imperative mood.
@@ -66,81 +64,80 @@ Avoid disclaimers, personal references, or mention of AI.
 Stay consistent with the style across this repository.
 
 List of must use exactly one of the allowed Gitmojis from this set:
-- 🎨 → Improve structure / format of the code."
-- ⚡️ → Improve performance"
-- 🔥 → Remove code or files"
-- 🐛 → Fix a bug"
-- 🚑️ → Critical hotfix"
-- ✨ → Introduce new features"
-- 📝 → Add or update documentation"
-- 🚀 → Deploy stuff"
-- 💄 → Add or update the UI and style files"
-- 🎉 → Begin a project"
-- ✅ → Add, update, or pass tests"
-- 🔒️ → Fix security or privacy issues"
-- 🔐 → Add or update secrets"
-- 🔖 → Release / Version tags"
-- 🚨 → Fix compiler / linter warnings"
-- 🚧 → Work in progress"
-- 💚 → Fix CI Build"
-- ⬇️ → Downgrade dependencies"
-- ⬆️ → Upgrade dependencies"
-- 📌 → Pin dependencies to specific versions"
-- 👷 → Add or update CI build system"
-- 📈 → Add or update analytics or track code"
-- ♻️ → Refactor code"
-- ➕ → Add a dependency"
-- ➖ → Remove a dependency"
-- 🔧 → Add or update configuration files"
-- 🔨 → Add or update development scripts"
-- 🌐 → Internationalization and localization"
-- ✏️ → Fix typos"
-- 💩 → Write bad code that needs to be improved"
-- ⏪️ → Revert changes"
-- 🔀 → Merge branches"
-- 📦️ → Add or update compiled files or packages"
-- 👽️ → Update code due to external API changes"
-- 🚚 → Move or rename resources (e.g.: files, paths, routes)."
-- 💥 → Introduce breaking changes"
-- 🍱 → Add or update assets"
-- ♿️ → Improve accessibility"
-- 💡 → Add or update comments in source code"
-- 🍻 → Write code drunkenly"
-- 💬 → Add or update text and literals"
-- 🗃️ → Perform database related changes"
-- 🔊 → Add or update logs"
-- 🔇 → Remove logs"
-- 👥 → Add or update contributor(s)"
-- 🚸 → Improve user experience / usability"
-- 🏗️ → Make architectural changes"
-- 📱 → Work on responsive design"
-- 🤡 → Mock things"
-- 🥚 → Add or update an easter egg"
-- 🙈 → Add or update a .gitignore file"
-- 📸 → Add or update snapshots"
-- ⚗️ → Perform experiments"
-- 🔍️ → Improve SEO"
-- 🏷️ → Add or update types"
-- 🌱 → Add or update seed files"
-- 🚩 → Add, update, or remove feature flags"
-- 🥅 → Catch errors"
-- 💫 → Add or update animations and transitions"
-- 🗑️ → Deprecate code that needs to be cleaned up"
-- 🛂 → Work on code related to authorization, roles and permissions"
-- 🩹 → Simple fix for a non-critical issue"
-- 🧐 → Data exploration/inspection"
-- ⚰️ → Remove dead code"
-- 🧪 → Add a failing test"
-- 👔 → Add or update business logic"
-- 🩺 → Add or update healthcheck"
-- 🧱 → Infrastructure related changes"
-- 🧑‍💻 → Improve developer experience"
-- 💸 → Add sponsorships or money related infrastructure"
-- 🧵 → Add or update code related to multithreading or concurrency"
-- 🦺 → Add or update code related to validation"
+- 🎨 → Improve structure / format of the code.
+- ⚡️ → Improve performance
+- 🔥 → Remove code or files
+- 🐛 → Fix a bug
+- 🚑️ → Critical hotfix
+- ✨ → Introduce new features
+- 📝 → Add or update documentation
+- 🚀 → Deploy stuff
+- 💄 → Add or update the UI and style files
+- 🎉 → Begin a project
+- ✅ → Add, update, or pass tests
+- 🔒️ → Fix security or privacy issues
+- 🔐 → Add or update secrets
+- 🔖 → Release / Version tags
+- 🚨 → Fix compiler / linter warnings
+- 🚧 → Work in progress
+- 💚 → Fix CI Build
+- ⬇️ → Downgrade dependencies
+- ⬆️ → Upgrade dependencies
+- 📌 → Pin dependencies to specific versions
+- 👷 → Add or update CI build system
+- 📈 → Add or update analytics or track code
+- ♻️ → Refactor code
+- ➕ → Add a dependency
+- ➖ → Remove a dependency
+- 🔧 → Add or update configuration files
+- 🔨 → Add or update development scripts
+- 🌐 → Internationalization and localization
+- ✏️ → Fix typos
+- 💩 → Write bad code that needs to be improved
+- ⏪️ → Revert changes
+- 🔀 → Merge branches
+- 📦️ → Add or update compiled files or packages
+- 👽️ → Update code due to external API changes
+- 🚚 → Move or rename resources (e.g.: files, paths, routes).
+- 💥 → Introduce breaking changes
+- 🍱 → Add or update assets
+- ♿️ → Improve accessibility
+- 💡 → Add or update comments in source code
+- 🍻 → Write code drunkenly
+- 💬 → Add or update text and literals
+- 🗃️ → Perform database related changes
+- 🔊 → Add or update logs
+- 🔇 → Remove logs
+- 👥 → Add or update contributor(s)
+- 🚸 → Improve user experience / usability
+- 🏗️ → Make architectural changes
+- 📱 → Work on responsive design
+- 🤡 → Mock things
+- 🥚 → Add or update an easter egg
+- 🙈 → Add or update a .gitignore file
+- 📸 → Add or update snapshots
+- ⚗️ → Perform experiments
+- 🔍️ → Improve SEO
+- 🏷️ → Add or update types
+- 🌱 → Add or update seed files
+- 🚩 → Add, update, or remove feature flags
+- 🥅 → Catch errors
+- 💫 → Add or update animations and transitions
+- 🗑️ → Deprecate code that needs to be cleaned up
+- 🛂 → Work on code related to authorization, roles and permissions
+- 🩹 → Simple fix for a non-critical issue
+- 🧐 → Data exploration/inspection
+- ⚰️ → Remove dead code
+- 🧪 → Add a failing test
+- 👔 → Add or update business logic
+- 🩺 → Add or update healthcheck
+- 🧱 → Infrastructure related changes
+- 🧑‍💻 → Improve developer experience
+- 💸 → Add sponsorships or money related infrastructure
+- 🧵 → Add or update code related to multithreading or concurrency
+- 🦺 → Add or update code related to validation
 `
 
-// Pull Request title instructions
 const defaultPRTitleFormattingInstructions = `
 As an expert software developer, generate a **clear and concise** pull request title.
 **Requirements:**
@@ -155,9 +152,9 @@ As an expert software developer, generate a **clear and concise** pull request t
 - Align with **repository standards**.
 
 **OUTPUT FORMAT:**
-` + "`" + `[<ticket number>] <pull request title>` + "`"
+[<ticket number>] <pull request title>
+`
 
-// Pull Request body instructions
 const defaultPRBodyFormattingInstructions = `
 As an expert software developer, write a **concise and structured** Pull Request body.
 **Requirements:**
@@ -168,7 +165,6 @@ As an expert software developer, write a **concise and structured** Pull Request
 - Follow **consistent formatting**: exclude disclaimers, personal references, or mentions of AI.
 
 **OUTPUT FORMAT:**
-` + "```" + `
 ### Description
 (Summary of changes in a few sentences)
 
@@ -177,9 +173,8 @@ As an expert software developer, write a **concise and structured** Pull Request
 
 ### Ticket links (Skip if no JIRA ticket)
 - [JIRA-0000]
-` + "```"
+`
 
-// Commit message instructions
 const defaultCommitFormattingInstructions = `
 As an expert software developer, generate a **clear and structured** Git commit message following **Conventional Commits**.
 **Requirements:**
@@ -191,10 +186,11 @@ As an expert software developer, generate a **clear and structured** Git commit 
 - Output **exactly one line**.
 
 **OUTPUT FORMAT:**
-` + "`" + `<gitmoji> type: <description>` + "`"
+<gitmoji> type: <description>
+`
 
 /* =======================================
-   ==============  GLOBALS   =============
+   =============  GLOBALS   =============
    ======================================= */
 
 var (
@@ -257,7 +253,7 @@ func (g *GitOperations) GetCommitMessages(mBranch, currentBranch string) (string
 
 func (g *GitOperations) GetLastCommitMessage() (string, error) {
 	logDebug("Getting last commit message (git log -1 --pretty=format:%s)")
-	out, err := runCmd("git", "log", "-1", "--pretty=format:%s")
+	out, err := runCmd("git", "-1", "--pretty=format:%s")
 	return strings.TrimSpace(out), err
 }
 
@@ -298,7 +294,7 @@ func runCmd(name string, args ...string) (string, error) {
 	logDebug(fmt.Sprintf("Running command: %s %v", name, args))
 	cmd := exec.Command(name, args...)
 	out, err := cmd.CombinedOutput()
-	return string(out), err
+	return strings.TrimSpace(string(out)), err
 }
 
 func performWithSpinner(desc string, fn func() (string, error)) (string, error) {
@@ -321,7 +317,7 @@ func executeCommandWithCheck(name string, args ...string) {
 }
 
 func buildInputData(ticketNumber, branchName, prTitle, commits, diff string) string {
-	input := fmt.Sprintf(`INPUT:
+	return fmt.Sprintf(`INPUT:
 TICKET NUMBER: %s
 BRANCH NAME:   %s
 PULL REQUEST TITLE: %s
@@ -330,18 +326,14 @@ COMMIT MESSAGES LIST:
 GIT DIFFERENCE TO HEAD:
 %s
 `, ticketNumber, branchName, prTitle, commits, diff)
-	return input
 }
 
 /* =======================================
    ===========  GitAI METHODS  ===========
    ======================================= */
 
-func (g *GitAI) GenerateMessage(systemInstructions string, userInstructions string, inputData string) (string, error) {
+func (g *GitAI) GenerateMessage(systemInstructions, userInstructions, inputData string) (string, error) {
 	logDebug("Preparing OpenAI request")
-	logDebug(fmt.Sprintf("System instructions:\n%s", systemInstructions))
-	logDebug(fmt.Sprintf("User instructions:\n%s", userInstructions))
-	logDebug(fmt.Sprintf("User data:\n%s", inputData))
 
 	var resp openai.ChatCompletionResponse
 	_, err := performWithSpinner("🤖 Generating AI message", func() (string, error) {
@@ -390,10 +382,17 @@ func (g *GitAI) editContentWithVim(initialContent string) (string, bool) {
 	}
 	defer os.Remove(tmpFile.Name())
 
-	_, _ = tmpFile.WriteString(initialContent)
+	if _, err := tmpFile.WriteString(initialContent); err != nil {
+		logError(fmt.Sprintf("Failed to write to temp file: %s", err.Error()))
+		return "", false
+	}
 	tmpFile.Close()
 
-	stat, _ := os.Stat(tmpFile.Name())
+	stat, err := tmpFile.Stat()
+	if err != nil {
+		logError(fmt.Sprintf("Failed to stat temp file: %s", err.Error()))
+		return "", false
+	}
 	origModTime := stat.ModTime()
 
 	logMessage(color.FgBlue, "✍️", "Opening Vim editor for final review...")
@@ -413,7 +412,11 @@ func (g *GitAI) editContentWithVim(initialContent string) (string, bool) {
 	}
 	finalContent := string(finalBytes)
 
-	statAfter, _ := os.Stat(tmpFile.Name())
+	statAfter, err := os.Stat(tmpFile.Name())
+	if err != nil {
+		logError(fmt.Sprintf("Failed to stat temp file after editing: %s", err.Error()))
+		return finalContent, false
+	}
 	if statAfter.ModTime().Equal(origModTime) || strings.TrimSpace(finalContent) == "" {
 		logMessage(color.FgYellow, "⚠️", "No changes saved in the editor")
 		return finalContent, false
@@ -451,37 +454,31 @@ func (g *GitAI) generateDiffBasedMessage(staged bool) (string, bool) {
 
 /* ==========  COMMIT  ========== */
 
-func (g *GitAI) Commit(amend bool) {
+func (g *GitAI) Commit(extraArgs []string) error {
 	logMessage(color.FgBlue, "📢", "Starting commit process...")
 
 	// Check if there are any changes to commit
 	hasChanges, err := g.gitOps.HasChanges()
 	if err != nil {
 		logError(fmt.Sprintf("Failed to check for changes: %s", err.Error()))
-		return
+		return err
 	}
 	if !hasChanges {
 		logMessage(color.FgYellow, "ℹ️", "Nothing to commit. Exiting.")
-		return
+		return nil
 	}
 
 	if err := g.stageChangesIfNeeded(); err != nil {
-		return
-	}
-
-	if amend {
-		if msg, err := g.gitOps.GetLastCommitMessage(); err == nil {
-			logMessage(color.FgCyan, "ℹ️", fmt.Sprintf("Amending last commit: %s", color.New(color.Bold).Sprint(msg)))
-		}
+		return err
 	}
 
 	finalMessage, ok := g.generateDiffBasedMessage(true)
 	if !ok {
 		logMessage(color.FgYellow, "🚫", "Commit canceled by user.")
-		return
+		return nil
 	}
 	logDebug("Committing changes with final message")
-	g.executeCommit(finalMessage, amend)
+	return g.executeCommit(finalMessage, extraArgs)
 }
 
 func (g *GitAI) stageChangesIfNeeded() error {
@@ -498,47 +495,63 @@ func (g *GitAI) stageChangesIfNeeded() error {
 	return nil
 }
 
-func (g *GitAI) executeCommit(finalMessage string, amend bool) {
-	args := []string{"commit"}
-	if amend {
-		args = append(args, "--amend")
-	}
-	args = append(args, "-m", finalMessage)
+func (g *GitAI) executeCommit(finalMessage string, extraArgs []string) error {
+	// Initialize commitArgs with the commit command
+	commitArgs := []string{"commit"}
 
-	out, err := runCmd("git", args...)
+	// Append extraArgs to allow overriding or adding flags
+	commitArgs = append(commitArgs, extraArgs...)
+
+	// Append the commit message
+	commitArgs = append(commitArgs, "-m", finalMessage)
+
+	logDebug(fmt.Sprintf("Executing command: git %s", strings.Join(commitArgs, " ")))
+
+	out, err := runCmd("git", commitArgs...)
 	if err != nil {
 		logError(fmt.Sprintf("Failed to commit changes: %v\nOutput: %s", err, out))
-		os.Exit(1)
+		return fmt.Errorf("failed to commit changes: %w", err)
 	}
 	logMessage(color.FgGreen, "🎉", "Changes committed successfully!")
+	return nil
 }
 
 /* ==========  STASH  ========== */
 
-func (g *GitAI) Stash() {
+func (g *GitAI) Stash(extraArgs []string) error {
 	logMessage(color.FgBlue, "📢", "Stashing changes with AI message...")
 	message, ok := g.generateDiffBasedMessage(false)
 	if !ok {
 		logMessage(color.FgYellow, "🚫", "Stash canceled by user.")
-		return
+		return nil
 	}
-	out, err := runCmd("git", "stash", "push", "-m", message)
+
+	// Initialize stashArgs with default stash command and message
+	stashArgs := []string{"stash", "push", "-m", message}
+
+	// Append extraArgs to allow overriding or adding flags
+	stashArgs = append(stashArgs, extraArgs...)
+
+	logDebug(fmt.Sprintf("Executing command: git %s", strings.Join(stashArgs, " ")))
+
+	out, err := runCmd("git", stashArgs...)
 	if err != nil {
 		logError(fmt.Sprintf("Failed to stash changes: %s\nOutput: %s", err.Error(), out))
-		os.Exit(1)
+		return fmt.Errorf("failed to stash changes: %w", err)
 	}
 	logMessage(color.FgGreen, "🎉", "Changes stashed successfully!")
+	return nil
 }
 
 /* ==========  PUSH & PR  ========== */
 
-func (g *GitAI) Push() {
+func (g *GitAI) Push(extraArgs []string) error {
 	logMessage(color.FgBlue, "🌐", "Preparing to push changes...")
 
 	currentBranch, err := g.gitOps.GetCurrentBranch()
 	if err != nil {
 		logError(fmt.Sprintf("Could not get current branch: %s", err.Error()))
-		return
+		return err
 	}
 	logDebug(fmt.Sprintf("Current branch: %s", currentBranch))
 
@@ -546,25 +559,25 @@ func (g *GitAI) Push() {
 	hasCommits, err := g.gitOps.HasCommitsToPush(mainBranch, currentBranch)
 	if err != nil {
 		logError(fmt.Sprintf("Failed to check for commits to push: %s", err.Error()))
-		return
+		return err
 	}
 	if !hasCommits {
 		logMessage(color.FgYellow, "ℹ️", "Nothing to push. Exiting.")
-		return
+		return nil
 	}
 
 	logMessage(color.FgBlue, "🌐", "Pushing changes to remote...")
 
-	if err := g.pushChanges(currentBranch); err != nil {
+	if err := g.pushChanges(extraArgs); err != nil {
 		logError(err.Error())
-		return
+		return err
 	}
 
 	logDebug("Checking for existing PR...")
 	prNumber, err := g.getExistingPRNumber(currentBranch)
 	if err != nil {
 		logError(err.Error())
-		return
+		return err
 	}
 
 	commitMsgs, _ := g.gitOps.GetCommitMessages(mainBranch, currentBranch)
@@ -575,7 +588,7 @@ func (g *GitAI) Push() {
 		logMessage(color.FgCyan, "📝", fmt.Sprintf("Pull request #%s found. Updating body...", color.New(color.Bold).Sprint(prNumber)))
 		if err := g.updatePRBody(prNumber, currentBranch, commitMsgs, diff, ticketNumber); err != nil {
 			logError(err.Error())
-			return
+			return err
 		}
 	} else {
 		logMessage(color.FgBlue, "🚀", "No existing PR found. Creating new PR...")
@@ -584,24 +597,58 @@ func (g *GitAI) Push() {
 	}
 
 	g.openPRInBrowser(prNumber)
+	return nil
 }
 
-func (g *GitAI) pushChanges(branch string) error {
+func (g *GitAI) pushChanges(extraArgs []string) error {
 	logMessage(color.FgBlue, "🔎", "Fetching latest from origin...")
-	_, err := performWithSpinner("🛰️ Fetching from origin", func() (string, error) {
+	if _, err := performWithSpinner("🛰️ Fetching from origin", func() (string, error) {
 		return runCmd("git", "fetch", "origin", mainBranch)
-	})
-	if err != nil {
-		return fmt.Errorf("Failed to fetch from origin: %w", err)
+	}); err != nil {
+		return fmt.Errorf("failed to fetch from origin: %w", err)
 	}
 
-	logMessage(color.FgBlue, "🌐", "Pushing changes...")
+	// Determine the current branch internally
+	currentBranch, err := g.gitOps.GetCurrentBranch()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+	logDebug(fmt.Sprintf("Current branch: %s", currentBranch))
+
+	// Check if '--set-upstream' is already present in extraArgs to prevent duplication
+	setUpstreamPresent := false
+	for _, arg := range extraArgs {
+		if arg == "--set-upstream" || arg == "-u" {
+			setUpstreamPresent = true
+			break
+		}
+		if strings.HasPrefix(arg, "--set-upstream=") {
+			setUpstreamPresent = true
+			break
+		}
+	}
+
+	// Initialize pushArgs with 'push' command
+	pushArgs := []string{"push"}
+
+	// Append default '--set-upstream origin {branch}' if not present
+	if !setUpstreamPresent {
+		pushArgs = append(pushArgs, "--set-upstream", "origin", currentBranch)
+	}
+
+	// Append extraArgs provided by the user
+	pushArgs = append(pushArgs, extraArgs...)
+
+	logDebug(fmt.Sprintf("Executing command: git %s", strings.Join(pushArgs, " ")))
+
+	// Execute the git push command with the constructed arguments
 	pushOutput, pushErr := performWithSpinner("🚀 Pushing changes", func() (string, error) {
-		return runCmd("git", "push", "--set-upstream", "origin", branch)
+		return runCmd("git", pushArgs...)
 	})
 	if pushErr != nil {
-		return fmt.Errorf("Failed to push changes:\n%s", pushOutput)
+		return fmt.Errorf("failed to push changes:\n%s", pushOutput)
 	}
+
 	logMessage(color.FgGreen, "🎉", "Changes pushed successfully!")
 	return nil
 }
@@ -754,33 +801,59 @@ var instructionsCmd = &cobra.Command{
 }
 
 var commitCmd = &cobra.Command{
-	Use:     "commit",
-	Short:   "Generate an AI-powered commit message",
+	Use:   "commit [-- git commit flags]",
+	Short: "Generate an AI-powered commit message. Pass additional git commit flags after '--'.",
+	Long: `The commit command generates an AI-powered commit message and allows you to pass additional flags directly to git commit.
+
+Usage:
+  gai commit [flags] [-- git commit flags]
+
+Examples:
+  gai commit -- --amend --force --root
+  gai commit -- -v
+`,
 	Aliases: []string{"c"},
-	Run: func(cmd *cobra.Command, args []string) {
-		amend, _ := cmd.Flags().GetBool("amend")
+	RunE: func(cmd *cobra.Command, args []string) error {
 		g := mustNewGitAI()
-		g.Commit(amend)
+		return g.Commit(args)
 	},
 }
 
 var pushCmd = &cobra.Command{
-	Use:     "push",
-	Short:   "Push changes and create/update a PR",
+	Use:   "push [-- git push flags]",
+	Short: "Push changes and create/update a PR. Pass additional git push flags after '--'.",
+	Long: `The push command pushes your changes to the remote repository and manages pull requests.
+
+Usage:
+  gai push [flags] [-- git push flags]
+
+Examples:
+  gai push -- --force
+  gai push -- --set-upstream origin feature-branch
+`,
 	Aliases: []string{"p"},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		g := mustNewGitAI()
-		g.Push()
+		return g.Push(args)
 	},
 }
 
 var stashCmd = &cobra.Command{
-	Use:     "stash",
-	Short:   "Stash changes with an AI-generated message",
+	Use:   "stash [-- git stash flags]",
+	Short: "Stash changes with an AI-generated message. Pass additional git stash flags after '--'.",
+	Long: `The stash command stashes your changes with an AI-generated message and allows you to pass additional flags directly to git stash.
+
+Usage:
+  gai stash [flags] [-- git stash flags]
+
+Examples:
+  gai stash -- --keep-index
+  gai stash -- -u
+`,
 	Aliases: []string{"s"},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		g := mustNewGitAI()
-		g.Stash()
+		return g.Stash(args)
 	},
 }
 
@@ -790,9 +863,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("verbose", "V", false, "Enable verbose output")
 	_ = viper.BindPFlag("VERBOSE", rootCmd.PersistentFlags().Lookup("verbose"))
 
-	commitCmd.Flags().Bool("amend", false, "Amend the last commit")
-	_ = viper.BindPFlag("AMEND", commitCmd.Flags().Lookup("amend"))
-
 	rootCmd.AddCommand(versionCmd, instructionsCmd, commitCmd, pushCmd, stashCmd)
 }
 
@@ -801,14 +871,12 @@ func initConfig() {
 
 	// Determine configuration directory
 	configDir = viper.GetString("GAI_CONFIG_DIR")
-
 	if configDir == "" {
 		configDir = os.Getenv("XDG_CONFIG_HOME")
 		if configDir == "" {
-			configDir = os.Getenv("HOME")
-			configDir += "/.config"
+			configDir = filepath.Join(os.Getenv("HOME"), ".config")
 		}
-		configDir += "/gai"
+		configDir = filepath.Join(configDir, "gai")
 	}
 
 	// Define paths to prompt templates
@@ -826,8 +894,8 @@ func initConfig() {
 	// Default configuration
 	viper.SetDefault("OPENAI_MODEL", "gpt-4o-mini")
 	viper.SetDefault("OPENAI_MAX_TOKENS", 16384)
-	viper.SetDefault("OPENAI_TEMPERATURE", 1.5)
 	viper.SetDefault("OPENAI_TEMPERATURE", 0.0)
+	viper.SetDefault("OPENAI_TOP_P", 1.0)
 	viper.SetDefault("MAIN_BRANCH", "main")
 	viper.SetDefault("VERBOSE", false)
 
@@ -842,7 +910,7 @@ func initConfig() {
 // loadPrompt attempts to read a prompt from the given path.
 // If the file does not exist or an error occurs, it returns the default content.
 func loadPrompt(path, defaultContent string) string {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			logDebug(fmt.Sprintf("Prompt file not found at %s. Using default.", path))
