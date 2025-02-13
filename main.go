@@ -1,16 +1,20 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/briandowns/spinner"
@@ -143,9 +147,65 @@ func (g *GitOperations) HasCommitsToPush(mainBranch, currentBranch string) (bool
 	return strings.TrimSpace(commitMsgs) != "", nil
 }
 
+func streamOutput(cmd *exec.Cmd) (string, error) {
+	// Create pipes for stdout and stderr
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return "", err
+	}
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	// Create a buffer to store the complete output
+	var outputBuffer bytes.Buffer
+
+	// Create a WaitGroup to wait for both goroutines
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Function to handle output stream
+	streamHandler := func(reader io.Reader, writer io.Writer) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			line := scanner.Text()
+			fmt.Fprintln(writer, line)
+			outputBuffer.WriteString(line + "\n")
+		}
+	}
+
+	// Start goroutines for stdout and stderr
+	go streamHandler(stdoutPipe, os.Stdout)
+	go streamHandler(stderrPipe, os.Stderr)
+
+	// Wait for output processing to complete
+	wg.Wait()
+
+	// Wait for the command to complete
+	err = cmd.Wait()
+	return strings.TrimSpace(outputBuffer.String()), err
+}
+
 func runCmd(name string, args ...string) (string, error) {
 	logDebug(fmt.Sprintf("Running command: %s %v", name, args))
 	cmd := exec.Command(name, args...)
+
+	// Use real-time output for git operations
+	if name == "git" && len(args) > 0 {
+		switch args[0] {
+		case "push", "commit", "stash":
+			return streamOutput(cmd)
+		}
+	}
+
+	// For other commands, use the original behavior
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
