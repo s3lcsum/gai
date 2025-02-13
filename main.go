@@ -142,56 +142,56 @@ List of must use exactly one of the allowed Gitmojis from this set:
 
 // Pull Request title instructions
 const defaultPRTitleFormattingInstructions = `
-As an expert software developer, generate a clear pull request title. Requirements:
-- If JIRA ticket number is provided, place it at the start in brackets
-- Summarize the main purpose
-- Keep under 140 characters
-- Use imperative mood
-- Do not end with a period
-- Must be a complete thought
-- Maintain consistency across all PR titles
-- Do not add disclaimers or AI references
-- Keep style aligned with repository standards
+As an expert software developer, generate a **clear and concise** pull request title.
+**Requirements:**
+- If a JIRA ticket number is provided, place it at the start in brackets.
+- Summarize the main purpose.
+- Keep under **140 characters**.
+- Use **imperative mood** (e.g., "fix bug" instead of "fixed bug").
+- Do **not** end with a period.
+- Ensure the title is a **complete thought**.
+- Follow **consistent style** across all PR titles.
+- Exclude disclaimers, personal references, or mentions of AI.
+- Align with **repository standards**.
 
-OUTPUT FORMAT:
-[<ticket number>] <pull request title>
-`
+**OUTPUT FORMAT:**
+` + "`" + `[<ticket number>] <pull request title>` + "`"
 
 // Pull Request body instructions
 const defaultPRBodyFormattingInstructions = `
-As an expert software developer, write a concise Pull Request body. Requirements:
-- Summarize the main purpose in a few sentences, imperative mood
-- Include a bullet list of key changes
-- If a JIRA ticket is present, link it under "Ticket links"
-- Keep sentences short
-- Maintain style consistency: do not add disclaimers or AI references
+As an expert software developer, write a **concise and structured** Pull Request body.
+**Requirements:**
+- Summarize the main purpose in a few sentences using **imperative mood**.
+- Provide a **bullet list** of key changes.
+- If a JIRA ticket exists, link it under "Ticket links."
+- Use **short and direct sentences**.
+- Follow **consistent formatting**: exclude disclaimers, personal references, or mentions of AI.
 
-OUTPUT FORMAT:
+**OUTPUT FORMAT:**
+` + "```" + `
 ### Description
 (Summary of changes in a few sentences)
 
 ### Changes
-* Bullet points of key changes
+- Bullet points of key changes
 
-### Ticket links // Skip if no JIRA Ticket found
-* [JIRA-0000]
-`
+### Ticket links (Skip if no JIRA ticket)
+- [JIRA-0000]
+` + "```"
 
 // Commit message instructions
 const defaultCommitFormattingInstructions = `
-As an expert developer, generate a Git commit message following Conventional Commits:
-Requirements:
-- Use the format: <gitmoji> [type]: <description>
-- The entire line must stay under 80 characters
-- Use imperative mood (e.g., "add" not "added")
-- Do not end with a period
-- Condense multiple changes into a single descriptive line if needed
-- Do not add disclaimers or references to yourself or AI
-- Output exactly one line
+As an expert software developer, generate a **clear and structured** Git commit message following **Conventional Commits**.
+**Requirements:**
+- Keep the entire line **under 80 characters**.
+- Use **imperative mood** (e.g., "add" instead of "added").
+- Do **not** end with a period.
+- Condense multiple changes into **a single descriptive line** if necessary.
+- Exclude disclaimers, personal references, or mentions of AI.
+- Output **exactly one line**.
 
-OUTPUT FORMAT:
-<gitmoji> [type]: <description>
-`
+**OUTPUT FORMAT:**
+` + "`" + `<gitmoji> type: <description>` + "`"
 
 /* =======================================
    ==============  GLOBALS   =============
@@ -471,7 +471,7 @@ func (g *GitAI) Commit(amend bool) {
 
 	if amend {
 		if msg, err := g.gitOps.GetLastCommitMessage(); err == nil {
-			logMessage(color.FgCyan, "ℹ️", fmt.Sprintf("Amending last commit: %s", msg))
+			logMessage(color.FgCyan, "ℹ️", fmt.Sprintf("Amending last commit: %s", color.New(color.Bold).Sprint(msg)))
 		}
 	}
 
@@ -572,7 +572,7 @@ func (g *GitAI) Push() {
 	ticketNumber := g.detectTicketNumber(currentBranch)
 
 	if prNumber != "" {
-		logMessage(color.FgCyan, "📝", fmt.Sprintf("Pull request #%s found. Updating body...", prNumber))
+		logMessage(color.FgCyan, "📝", fmt.Sprintf("Pull request #%s found. Updating body...", color.New(color.Bold).Sprint(prNumber)))
 		if err := g.updatePRBody(prNumber, currentBranch, commitMsgs, diff, ticketNumber); err != nil {
 			logError(err.Error())
 			return
@@ -779,19 +779,15 @@ func initConfig() {
 	viper.AutomaticEnv()
 
 	// Determine configuration directory
-	configDir = os.Getenv("GAI_CONFIG")
+	configDir = viper.GetString("GAI_CONFIG_DIR")
+
 	if configDir == "" {
-		xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
-		if xdgConfigHome == "" {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				logError(fmt.Sprintf("Unable to determine home directory: %s", err.Error()))
-				os.Exit(1)
-			}
-			configDir = filepath.Join(homeDir, ".config", "gai")
-		} else {
-			configDir = filepath.Join(xdgConfigHome, "gai")
+		configDir = os.Getenv("XDG_CONFIG_HOME")
+		if configDir == "" {
+			configDir = os.Getenv("HOME")
+			configDir += "/.config"
 		}
+		configDir += "/gai"
 	}
 
 	// Define paths to prompt templates
@@ -834,7 +830,7 @@ func loadPrompt(path, defaultContent string) string {
 		}
 		return defaultContent
 	}
-	logMessage(color.BgHiMagenta, "🔬", fmt.Sprintf("Loaded prompt from %s", path))
+	logMessage(color.FgCyan, "🔬", fmt.Sprintf("Loaded prompt from %s", color.New(color.Bold).Sprint(path)))
 	return string(data)
 }
 
