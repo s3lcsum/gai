@@ -1,104 +1,131 @@
-# 🦄 GitAI: The Ultimate AI-Powered Git Assistant 🚀
+# 🦄 GAI - Git AI Assistant
 
-![GitAI Banner](https://media.giphy.com/media/26AHONQ79FdWZhAI0/giphy.gif)
+<div align="center">
+    <img src="https://media.giphy.com/media/26AHONQ79FdWZhAI0/giphy.gif" alt="GitAI Banner">
 
-## 🌟 What is GitAI?
-**GitAI** is your AI-powered Git assistant, helping you generate commit messages, stash descriptions, pull request titles, and PR bodies effortlessly! No more struggling to craft meaningful commit messages—let AI do the heavy lifting! 💡🤖
+  🌈 Enhance your Git workflow with AI-powered commit messages, PR descriptions, and more! ✨
+</div>
 
 ## ✨ Features
-- 📝 **AI-Generated Commit Messages**: Follow **Conventional Commits** with **gitmojis** 🎨.
-- 🎭 **Smart Stash Descriptions**: Never forget what you stashed!
-- 📜 **Pull Request Magic**: Auto-generate **PR titles and bodies** based on your code changes.
-- 🕵️ **Intelligent Ticket Detection**: Automatically includes JIRA tickets if present.
-- 🔄 **Amend Existing Commits**: Easily update previous commits with AI suggestions.
-- 🌈 **Super Nerdy Logging**: Debug mode gives you **extra fancy details**. 🧐
 
-## 🛠 Installation
+- 🤖 AI-powered commit message generation
+- 🚀 Automated PR creation and updates
+- 💾 Smart stash message generation
+- 🎨 JIRA ticket detection and integration
+- 🌟 Interactive editor support
+- 🔄 Seamless GitHub CLI integration
+
+## 🚀 Installation
+
+```bash
+go install github.com/s3lcusm/gai@latest
+```
 
 ### Prerequisites
-- 🐙 **Git**: You know, version control?
-- 🦊 **GitHub CLI (`gh`)**: For seamless PR creation.
-- 🧠 **OpenAI API Key**: Because AI needs a brain.
 
-### Install GitAI
-```sh
-# Clone the repo
-$ git clone https://github.com/your-repo/gitai.git && cd gitai
-
-# Build the binary
-$ go build -o gai main.go
-
-# Move to your bin folder (optional)
-$ mv gai /usr/local/bin/
-```
-
-## 🚀 Usage
-
-### 📝 AI-Powered Commit Messages
-```sh
-$ gai commit
-```
-💡 **Pro Tip:** Want to amend the last commit?
-```sh
-$ gai commit --amend
-```
-
-### 📦 Stash with AI Magic
-```sh
-$ gai stash
-```
-
-### 🚀 Push & Create a PR in One Step
-```sh
-$ gai push
-```
-
-### 🔍 Check Git Status
-```sh
-$ gai status
-```
+- Go 1.23 or higher
+- Git
+- GitHub CLI (`gh`)
+- OpenAI API key
 
 ## ⚙️ Configuration
-GitAI uses **environment variables** for configuration:
 
-```sh
-export OPENAI_API_KEY="your-secret-key"
-export MAIN_BRANCH="main"
-export VERBOSE=true  # If you love nerdy details
+1. Set your OpenAI API key:
+```bash
+export OPENAI_API_KEY='your-api-key'
 ```
 
-## 💻 How It Works
-1. **Extracts Git Diff** 📜
-2. **Generates a structured AI prompt** 🏗️
-3. **Sends request to OpenAI's API** 🚀
-4. **Returns a clean, nerd-approved message** 🤓
-5. **Lets you edit it (optional, because you're still the boss)** ✍️
-6. **Applies the commit/stash/PR action** ✅
-
-## 🧪 Example AI-Generated Commit Messages
-💡 Before: _"Fix stuff"_
-
-🚀 **After AI:**
-```sh
-✨ feat[database]: Optimize query performance
-🔧 fix[auth]: Patch security vulnerability in login flow
-📚 docs[README]: Update installation steps
+2. Ensure GitHub CLI is authenticated:
+```bash
+gh auth login
 ```
 
-## 🔥 Roadmap
-- [ ] 🔥 Support for more AI models (Claude, Gemini, Llama?)
-- [ ] 🏗️ Interactive AI assistant for resolving merge conflicts
-- [ ] 🛠️ Plugin system for custom commit styles
-- [ ] 🐙 Bitbucket & GitLab support
+## 💫 Usage
 
-## 🦸‍♂️ Contributing
-We welcome PRs, issues, and feature requests! Join our nerdy crew and make Git commits fun again! 🎉
+| Command | Description | Example |
+|---------|-------------|---------|
+| `gai commit` | Generate AI-powered commit message | `gai commit -- --amend` |
+| `gai push` | Push changes and manage PRs | `gai push -- --force` |
+| `gai stash` | Stash with AI-generated message | `gai stash -- --keep-index` |
+| `gai version` | Display version | `gai version` |
+| `gai instructions` | Show prompt templates | `gai instructions` |
 
-## 💖 Acknowledgments
-Special thanks to:
-- 🧑‍💻 [OpenAI](https://openai.com/) for making AI commits possible
-- 🦄 Unicorn developers everywhere 🦄
+## 🎯 Git Aliases
 
-## ⚡ License
-MIT License - because AI should be free! 🚀
+Supercharge your workflow by adding these aliases to your `.gitconfig`:
 
+```ini
+[alias]
+  cai = !$GOBIN/gai commit
+  pai = !$GOBIN/gai push
+  sai = !$GOBIN/gai stash
+```
+
+Now you can use:
+- `git cai` instead of `gai commit`
+- `git pai` instead of `gai push`
+- `git sai` instead of `gai stash`
+
+## 🌈 Examples
+
+### 1. Creating a Commit
+```bash
+# Stage your changes
+git add .
+# Generate AI-powered commit message
+gai commit
+```
+
+### 2. Pushing and Creating PR
+```bash
+# Push changes and create/update PR
+gai push
+```
+
+### 3. Smart Stashing
+```bash
+# Stash changes with AI-generated description
+gai stash
+```
+
+<div align="center">
+  <img src="https://user-images.githubusercontent.com/1675298/67339509-4b630880-f4fd-11e9-8891-7a563dfe0182.gif" alt="Rainbow Magic">
+</div>
+
+## 🔑 Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | Your OpenAI API key | Required |
+| `OPENAI_MODEL` | OpenAI model to use | `gpt-4o-mini` |
+| `OPENAI_MAX_TOKENS` | Maximum tokens for responses | 16384 |
+| `OPENAI_TEMPERATURE` | Temperature for responses | 0.0 |
+| `MAIN_BRANCH` | Main branch name | `main` |
+| `GAI_CONFIG_DIR` | Custom config directory | `~/.config/gai` |
+
+## 🎨 Custom Prompt Templates
+
+You can customize the AI prompts by creating these files in your config directory:
+
+- `systemInstructions.md`
+- `prTitleFormattingInstructions.md`
+- `prBodyFormattingInstructions.md`
+- `commitFormattingInstructions.md`
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`gai commit`)
+4. Push to the branch (`gai push`)
+5. Open a Pull Request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+<div align="center">
+  Made with 💖 and AI magic ✨
+</div>
