@@ -24,7 +24,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const Version = "1.0.6"
+const Version = "1.0.7"
 
 //go:embed templates/systemInstructions.md
 var embeddedSystemInstructions string
