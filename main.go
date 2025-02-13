@@ -23,7 +23,7 @@ import (
    ==============  CONSTANTS  ============
    ======================================= */
 
-const Version = "1.0.2"
+const Version = "1.0.3"
 
 const ASCIIHeader = `
  ▄▄ • ▪  ▄▄▄▄▄ ▄▄▄· ▪  .▄▄ · .▄▄ · ▪  ▄▄▄▄▄
@@ -732,6 +732,27 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+var instructionsCmd = &cobra.Command{
+	Use:     "instructions",
+	Short:   "Displays all loaded instructions",
+	Long:    "This command prints all loaded instructions in a nicely formatted way to help users understand the available automation steps.",
+	Aliases: []string{"i"},
+	Run: func(cmd *cobra.Command, args []string) {
+		for _, instr := range []struct {
+			color   color.Attribute
+			title   string
+			content string
+		}{
+			{color.BgGreen, "SYSTEM INSTRUCTIONS", systemInstructionsContent},
+			{color.BgBlue, "PULL REQUEST TITLE INSTRUCTIONS", prTitleFormattingInstructions},
+			{color.BgRed, "PULL REQUEST BODY INSTRUCTIONS", prBodyFormattingInstructions},
+			{color.BgYellow, "COMMIT MESSAGE INSTRUCTIONS", commitFormattingInstructions},
+		} {
+			color.New(instr.color).Printf("\n# %s\n%s\n", instr.title, instr.content)
+		}
+	},
+}
+
 var commitCmd = &cobra.Command{
 	Use:     "commit",
 	Short:   "Generate an AI-powered commit message",
@@ -772,7 +793,7 @@ func init() {
 	commitCmd.Flags().Bool("amend", false, "Amend the last commit")
 	_ = viper.BindPFlag("AMEND", commitCmd.Flags().Lookup("amend"))
 
-	rootCmd.AddCommand(versionCmd, commitCmd, pushCmd, stashCmd)
+	rootCmd.AddCommand(versionCmd, instructionsCmd, commitCmd, pushCmd, stashCmd)
 }
 
 func initConfig() {
