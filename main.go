@@ -288,7 +288,6 @@ func (g *GitAI) editContentInEditor(initialContent string) (string, bool) {
 	logDebug("User saved new content. Displaying below.")
 	fmt.Println()
 	color.New(color.Bold).Println(string(finalContent))
-	fmt.Println()
 
 	return string(finalContent), true
 }
