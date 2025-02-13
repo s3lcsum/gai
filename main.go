@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -21,7 +23,7 @@ import (
    ==============  CONSTANTS  ============
    ======================================= */
 
-const Version = "1.0.1"
+const Version = "1.0.2"
 
 const ASCIIHeader = `
  ▄▄ • ▪  ▄▄▄▄▄ ▄▄▄· ▪  .▄▄ · .▄▄ · ▪  ▄▄▄▄▄
@@ -57,15 +59,89 @@ func logError(msg string) {
 /* ---------- AI PROMPTS ---------- */
 
 // System-level instructions
-const systemPrompt = `
+const defaultSystemInstructions = `
 You are an expert software developer who helps generate concise, high-quality
 Git-related messages. Provide brief, clear outputs with an imperative mood.
 Avoid disclaimers, personal references, or mention of AI.
 Stay consistent with the style across this repository.
+
+List of must use exactly one of the allowed Gitmojis from this set:
+- 🎨 → Improve structure / format of the code."
+- ⚡️ → Improve performance"
+- 🔥 → Remove code or files"
+- 🐛 → Fix a bug"
+- 🚑️ → Critical hotfix"
+- ✨ → Introduce new features"
+- 📝 → Add or update documentation"
+- 🚀 → Deploy stuff"
+- 💄 → Add or update the UI and style files"
+- 🎉 → Begin a project"
+- ✅ → Add, update, or pass tests"
+- 🔒️ → Fix security or privacy issues"
+- 🔐 → Add or update secrets"
+- 🔖 → Release / Version tags"
+- 🚨 → Fix compiler / linter warnings"
+- 🚧 → Work in progress"
+- 💚 → Fix CI Build"
+- ⬇️ → Downgrade dependencies"
+- ⬆️ → Upgrade dependencies"
+- 📌 → Pin dependencies to specific versions"
+- 👷 → Add or update CI build system"
+- 📈 → Add or update analytics or track code"
+- ♻️ → Refactor code"
+- ➕ → Add a dependency"
+- ➖ → Remove a dependency"
+- 🔧 → Add or update configuration files"
+- 🔨 → Add or update development scripts"
+- 🌐 → Internationalization and localization"
+- ✏️ → Fix typos"
+- 💩 → Write bad code that needs to be improved"
+- ⏪️ → Revert changes"
+- 🔀 → Merge branches"
+- 📦️ → Add or update compiled files or packages"
+- 👽️ → Update code due to external API changes"
+- 🚚 → Move or rename resources (e.g.: files, paths, routes)."
+- 💥 → Introduce breaking changes"
+- 🍱 → Add or update assets"
+- ♿️ → Improve accessibility"
+- 💡 → Add or update comments in source code"
+- 🍻 → Write code drunkenly"
+- 💬 → Add or update text and literals"
+- 🗃️ → Perform database related changes"
+- 🔊 → Add or update logs"
+- 🔇 → Remove logs"
+- 👥 → Add or update contributor(s)"
+- 🚸 → Improve user experience / usability"
+- 🏗️ → Make architectural changes"
+- 📱 → Work on responsive design"
+- 🤡 → Mock things"
+- 🥚 → Add or update an easter egg"
+- 🙈 → Add or update a .gitignore file"
+- 📸 → Add or update snapshots"
+- ⚗️ → Perform experiments"
+- 🔍️ → Improve SEO"
+- 🏷️ → Add or update types"
+- 🌱 → Add or update seed files"
+- 🚩 → Add, update, or remove feature flags"
+- 🥅 → Catch errors"
+- 💫 → Add or update animations and transitions"
+- 🗑️ → Deprecate code that needs to be cleaned up"
+- 🛂 → Work on code related to authorization, roles and permissions"
+- 🩹 → Simple fix for a non-critical issue"
+- 🧐 → Data exploration/inspection"
+- ⚰️ → Remove dead code"
+- 🧪 → Add a failing test"
+- 👔 → Add or update business logic"
+- 🩺 → Add or update healthcheck"
+- 🧱 → Infrastructure related changes"
+- 🧑‍💻 → Improve developer experience"
+- 💸 → Add sponsorships or money related infrastructure"
+- 🧵 → Add or update code related to multithreading or concurrency"
+- 🦺 → Add or update code related to validation"
 `
 
 // Pull Request title instructions
-const prTitleFormattingInstructions = `
+const defaultPRTitleFormattingInstructions = `
 As an expert software developer, generate a clear pull request title. Requirements:
 - If JIRA ticket number is provided, place it at the start in brackets
 - Summarize the main purpose
@@ -82,7 +158,7 @@ OUTPUT FORMAT:
 `
 
 // Pull Request body instructions
-const prBodyFormattingInstructions = `
+const defaultPRBodyFormattingInstructions = `
 As an expert software developer, write a concise Pull Request body. Requirements:
 - Summarize the main purpose in a few sentences, imperative mood
 - Include a bullet list of key changes
@@ -102,84 +178,9 @@ OUTPUT FORMAT:
 `
 
 // Commit message instructions
-const commitFormattingInstructions = `
+const defaultCommitFormattingInstructions = `
 As an expert developer, generate a Git commit message following Conventional Commits:
 Requirements:
-
-- Must use exactly one of the allowed Gitmojis from this set:
-🎨 for "Improve structure / format of the code."
-⚡️ for "Improve performance"
-🔥 for "Remove code or files"
-🐛 for "Fix a bug"
-🚑️ for "Critical hotfix"
-✨ for "Introduce new features"
-📝 for "Add or update documentation"
-🚀 for "Deploy stuff"
-💄 for "Add or update the UI and style files"
-🎉 for "Begin a project"
-✅ for "Add, update, or pass tests"
-🔒️ for "Fix security or privacy issues"
-🔐 for "Add or update secrets"
-🔖 for "Release / Version tags"
-🚨 for "Fix compiler / linter warnings"
-🚧 for "Work in progress"
-💚 for "Fix CI Build"
-⬇️ for "Downgrade dependencies"
-⬆️ for "Upgrade dependencies"
-📌 for "Pin dependencies to specific versions"
-👷 for "Add or update CI build system"
-📈 for "Add or update analytics or track code"
-♻️ for "Refactor code"
-➕ for "Add a dependency"
-➖ for "Remove a dependency"
-🔧 for "Add or update configuration files"
-🔨 for "Add or update development scripts"
-🌐 for "Internationalization and localization"
-✏️ for "Fix typos"
-💩 for "Write bad code that needs to be improved"
-⏪️ for "Revert changes"
-🔀 for "Merge branches"
-📦️ for "Add or update compiled files or packages"
-👽️ for "Update code due to external API changes"
-🚚 for "Move or rename resources (e.g.: files, paths, routes)."
-💥 for "Introduce breaking changes"
-🍱 for "Add or update assets"
-♿️ for "Improve accessibility"
-💡 for "Add or update comments in source code"
-🍻 for "Write code drunkenly"
-💬 for "Add or update text and literals"
-🗃️ for "Perform database related changes"
-🔊 for "Add or update logs"
-🔇 for "Remove logs"
-👥 for "Add or update contributor(s)"
-🚸 for "Improve user experience / usability"
-🏗️ for "Make architectural changes"
-📱 for "Work on responsive design"
-🤡 for "Mock things"
-🥚 for "Add or update an easter egg"
-🙈 for "Add or update a .gitignore file"
-📸 for "Add or update snapshots"
-⚗️ for "Perform experiments"
-🔍️ for "Improve SEO"
-🏷️ for "Add or update types"
-🌱 for "Add or update seed files"
-🚩 for "Add, update, or remove feature flags"
-🥅 for "Catch errors"
-💫 for "Add or update animations and transitions"
-🗑️ for "Deprecate code that needs to be cleaned up"
-🛂 for "Work on code related to authorization, roles and permissions"
-🩹 for "Simple fix for a non-critical issue"
-🧐 for "Data exploration/inspection"
-⚰️ for "Remove dead code"
-🧪 for "Add a failing test"
-👔 for "Add or update business logic"
-🩺 for "Add or update healthcheck"
-🧱 for "Infrastructure related changes"
-🧑‍💻 for "Improve developer experience"
-💸 for "Add sponsorships or money related infrastructure"
-🧵 for "Add or update code related to multithreading or concurrency"
-🦺 for "Add or update code related to validation"
-
 - Use the format: <gitmoji> [type]: <description>
 - The entire line must stay under 80 characters
 - Use imperative mood (e.g., "add" not "added")
@@ -197,11 +198,21 @@ OUTPUT FORMAT:
    ======================================= */
 
 var (
-	verbose           bool
-	mainBranch        string
-	openAIModel       string
-	openAIMaxTokens   int
-	openAITemperature float64
+	verbose                           bool
+	mainBranch                        string
+	openAIModel                       string
+	openAIMaxTokens                   int
+	openAITemperature                 float64
+	openAITopP                        float64
+	systemInstructionsContent         string
+	prTitleFormattingInstructions     string
+	prBodyFormattingInstructions      string
+	commitFormattingInstructions      string
+	configDir                         string
+	systemInstructionsPath            string
+	prTitleFormattingInstructionsPath string
+	prBodyFormattingInstructionsPath  string
+	commitFormattingInstructionsPath  string
 )
 
 // Simple custom error
@@ -326,7 +337,7 @@ GIT DIFFERENCE TO HEAD:
    ===========  GitAI METHODS  ===========
    ======================================= */
 
-func (g *GitAI) GenerateMessage(systemInstructions, userInstructions, inputData string) (string, error) {
+func (g *GitAI) GenerateMessage(systemInstructions string, userInstructions string, inputData string) (string, error) {
 	logDebug("Preparing OpenAI request")
 	logDebug(fmt.Sprintf("System instructions:\n%s", systemInstructions))
 	logDebug(fmt.Sprintf("User instructions:\n%s", userInstructions))
@@ -340,6 +351,7 @@ func (g *GitAI) GenerateMessage(systemInstructions, userInstructions, inputData 
 				Model:       openAIModel,
 				MaxTokens:   openAIMaxTokens,
 				Temperature: float32(openAITemperature),
+				TopP:        float32(openAITopP),
 				Messages: []openai.ChatCompletionMessage{
 					{Role: openai.ChatMessageRoleSystem, Content: systemInstructions},
 					{Role: openai.ChatMessageRoleUser, Content: userInstructions},
@@ -423,7 +435,7 @@ func (g *GitAI) generateDiffBasedMessage(staged bool) (string, bool) {
 	userData := buildInputData("", "", "", "", diff)
 
 	logDebug("Generating commit message with AI based on diff")
-	aiOutput, err := g.GenerateMessage(systemPrompt, commitFormattingInstructions, userData)
+	aiOutput, err := g.GenerateMessage(systemInstructionsContent, commitFormattingInstructions, userData)
 	if err != nil {
 		logError(fmt.Sprintf("OpenAI error: %s", err.Error()))
 		return "", false
@@ -617,7 +629,7 @@ func (g *GitAI) updatePRBody(prNumber, branch, commitMsgs, diff, ticketNumber st
 	prBodyInput := buildInputData(ticketNumber, branch, "", commitMsgs, diff)
 
 	logDebug("Generating new PR body with AI")
-	prBodyAI, err := g.GenerateMessage(systemPrompt, prBodyFormattingInstructions, prBodyInput)
+	prBodyAI, err := g.GenerateMessage(systemInstructionsContent, prBodyFormattingInstructions, prBodyInput)
 	if err != nil {
 		return fmt.Errorf("failed generating PR body: %w", err)
 	}
@@ -659,7 +671,7 @@ func (g *GitAI) createNewPR(branch, commitMsgs, diff, ticketNumber string) {
 	logDebug("Generating PR title")
 	prTitleInput := buildInputData(ticketNumber, branch, "", commitMsgs, diff)
 
-	prTitleAI, err := g.GenerateMessage(systemPrompt, prTitleFormattingInstructions, prTitleInput)
+	prTitleAI, err := g.GenerateMessage(systemInstructionsContent, prTitleFormattingInstructions, prTitleInput)
 	if err != nil {
 		logError(fmt.Sprintf("Failed to generate PR title: %s", err.Error()))
 		return
@@ -677,7 +689,7 @@ func (g *GitAI) createNewPR(branch, commitMsgs, diff, ticketNumber string) {
 
 	logDebug("Generating PR body")
 	prBodyInput := buildInputData(ticketNumber, branch, editedTitle, commitMsgs, diff)
-	prBodyAI, err := g.GenerateMessage(systemPrompt, prBodyFormattingInstructions, prBodyInput)
+	prBodyAI, err := g.GenerateMessage(systemInstructionsContent, prBodyFormattingInstructions, prBodyInput)
 	if err != nil {
 		logError(fmt.Sprintf("Failed to generate PR body: %s", err.Error()))
 		return
@@ -766,10 +778,39 @@ func init() {
 func initConfig() {
 	viper.AutomaticEnv()
 
+	// Determine configuration directory
+	configDir = os.Getenv("GAI_CONFIG")
+	if configDir == "" {
+		xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
+		if xdgConfigHome == "" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				logError(fmt.Sprintf("Unable to determine home directory: %s", err.Error()))
+				os.Exit(1)
+			}
+			configDir = filepath.Join(homeDir, ".config", "gai")
+		} else {
+			configDir = filepath.Join(xdgConfigHome, "gai")
+		}
+	}
+
+	// Define paths to prompt templates
+	systemInstructionsPath = filepath.Join(configDir, "systemInstructions.md")
+	prTitleFormattingInstructionsPath = filepath.Join(configDir, "prTitleFormattingInstructions.md")
+	prBodyFormattingInstructionsPath = filepath.Join(configDir, "prBodyFormattingInstructions.md")
+	commitFormattingInstructionsPath = filepath.Join(configDir, "commitFormattingInstructions.md")
+
+	// Load prompts from files or use defaults
+	systemInstructionsContent = loadPrompt(systemInstructionsPath, defaultSystemInstructions)
+	prTitleFormattingInstructions = loadPrompt(prTitleFormattingInstructionsPath, defaultPRTitleFormattingInstructions)
+	prBodyFormattingInstructions = loadPrompt(prBodyFormattingInstructionsPath, defaultPRBodyFormattingInstructions)
+	commitFormattingInstructions = loadPrompt(commitFormattingInstructionsPath, defaultCommitFormattingInstructions)
+
 	// Default configuration
 	viper.SetDefault("OPENAI_MODEL", "gpt-4o-mini")
 	viper.SetDefault("OPENAI_MAX_TOKENS", 16384)
-	viper.SetDefault("OPENAI_TEMPERATURE", 1.0)
+	viper.SetDefault("OPENAI_TEMPERATURE", 1.5)
+	viper.SetDefault("OPENAI_TEMPERATURE", 0.0)
 	viper.SetDefault("MAIN_BRANCH", "main")
 	viper.SetDefault("VERBOSE", false)
 
@@ -778,6 +819,23 @@ func initConfig() {
 	openAIModel = viper.GetString("OPENAI_MODEL")
 	openAIMaxTokens = viper.GetInt("OPENAI_MAX_TOKENS")
 	openAITemperature = viper.GetFloat64("OPENAI_TEMPERATURE")
+	openAITopP = viper.GetFloat64("OPENAI_TOP_P")
+}
+
+// loadPrompt attempts to read a prompt from the given path.
+// If the file does not exist or an error occurs, it returns the default content.
+func loadPrompt(path, defaultContent string) string {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logDebug(fmt.Sprintf("Prompt file not found at %s. Using default.", path))
+		} else {
+			logError(fmt.Sprintf("Error reading prompt file at %s: %s. Using default.", path, err.Error()))
+		}
+		return defaultContent
+	}
+	logMessage(color.BgHiMagenta, "🔬", fmt.Sprintf("Loaded prompt from %s", path))
+	return string(data)
 }
 
 func mustNewGitAI() *GitAI {
