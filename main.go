@@ -21,6 +21,8 @@ import (
    ==============  CONSTANTS  ============
    ======================================= */
 
+const Version = "1.0.1"
+
 const ASCIIHeader = `
  ▄▄ • ▪  ▄▄▄▄▄ ▄▄▄· ▪  .▄▄ · .▄▄ · ▪  ▄▄▄▄▄
 ▐█ ▀ ▪██ •██  ▐█ ▀█ ██ ▐█ ▀. ▐█ ▀. ██ •██
@@ -248,6 +250,26 @@ func (g *GitOperations) GetLastCommitMessage() (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+func (g *GitOperations) HasChanges() (bool, error) {
+	stagedDiff, err := g.GetDiff(true)
+	if err != nil {
+		return false, err
+	}
+	unstagedDiff, err := g.GetDiff(false)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(stagedDiff) != "" || strings.TrimSpace(unstagedDiff) != "", nil
+}
+
+func (g *GitOperations) HasCommitsToPush(mainBranch, currentBranch string) (bool, error) {
+	commitMsgs, err := g.GetCommitMessages(mainBranch, currentBranch)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(commitMsgs) != "", nil
+}
+
 /* =======================================
    =============    GitAI    =============
    ======================================= */
@@ -419,9 +441,22 @@ func (g *GitAI) generateDiffBasedMessage(staged bool) (string, bool) {
 
 func (g *GitAI) Commit(amend bool) {
 	logMessage(color.FgBlue, "📢", "Starting commit process...")
+
+	// Check if there are any changes to commit
+	hasChanges, err := g.gitOps.HasChanges()
+	if err != nil {
+		logError(fmt.Sprintf("Failed to check for changes: %s", err.Error()))
+		return
+	}
+	if !hasChanges {
+		logMessage(color.FgYellow, "ℹ️", "Nothing to commit. Exiting.")
+		return
+	}
+
 	if err := g.stageChangesIfNeeded(); err != nil {
 		return
 	}
+
 	if amend {
 		if msg, err := g.gitOps.GetLastCommitMessage(); err == nil {
 			logMessage(color.FgCyan, "ℹ️", fmt.Sprintf("Amending last commit: %s", msg))
@@ -435,7 +470,6 @@ func (g *GitAI) Commit(amend bool) {
 	}
 	logDebug("Committing changes with final message")
 	g.executeCommit(finalMessage, amend)
-	g.showGitStatusAfter("Commit")
 }
 
 func (g *GitAI) stageChangesIfNeeded() error {
@@ -467,11 +501,6 @@ func (g *GitAI) executeCommit(finalMessage string, amend bool) {
 	logMessage(color.FgGreen, "🎉", "Changes committed successfully!")
 }
 
-func (g *GitAI) showGitStatusAfter(action string) {
-	logMessage(color.FgBlue, "📢", fmt.Sprintf("Showing Git status after %s:", action))
-	executeCommandWithCheck("git", "status")
-}
-
 /* ==========  STASH  ========== */
 
 func (g *GitAI) Stash() {
@@ -492,7 +521,7 @@ func (g *GitAI) Stash() {
 /* ==========  PUSH & PR  ========== */
 
 func (g *GitAI) Push() {
-	logMessage(color.FgBlue, "🌐", "Pushing changes to remote...")
+	logMessage(color.FgBlue, "🌐", "Preparing to push changes...")
 
 	currentBranch, err := g.gitOps.GetCurrentBranch()
 	if err != nil {
@@ -501,11 +530,23 @@ func (g *GitAI) Push() {
 	}
 	logDebug(fmt.Sprintf("Current branch: %s", currentBranch))
 
+	// Check if there are commits to push
+	hasCommits, err := g.gitOps.HasCommitsToPush(mainBranch, currentBranch)
+	if err != nil {
+		logError(fmt.Sprintf("Failed to check for commits to push: %s", err.Error()))
+		return
+	}
+	if !hasCommits {
+		logMessage(color.FgYellow, "ℹ️", "Nothing to push. Exiting.")
+		return
+	}
+
+	logMessage(color.FgBlue, "🌐", "Pushing changes to remote...")
+
 	if err := g.pushChanges(currentBranch); err != nil {
 		logError(err.Error())
 		return
 	}
-	g.showGitStatusAfter("Push")
 
 	logDebug("Checking for existing PR...")
 	prNumber, err := g.getExistingPRNumber(currentBranch)
@@ -657,13 +698,6 @@ func (g *GitAI) createNewPR(branch, commitMsgs, diff, ticketNumber string) {
 	logMessage(color.FgGreen, "🎉", "Pull Request created successfully!")
 }
 
-/* ==========  SHOW STATUS  ========== */
-
-func (g *GitAI) ShowStatus() {
-	logMessage(color.FgBlue, "🔎", "Git Status:")
-	executeCommandWithCheck("git", "status")
-}
-
 /* =======================================
    ===========   CLI & SETUP   ===========
    ======================================= */
@@ -677,9 +711,19 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+var versionCmd = &cobra.Command{
+	Use:     "version",
+	Short:   "Print the version of gai",
+	Aliases: []string{"v"},
+	Run: func(cmd *cobra.Command, args []string) {
+		color.New(color.FgGreen).Printf("gai version %s\n", Version)
+	},
+}
+
 var commitCmd = &cobra.Command{
-	Use:   "commit",
-	Short: "Generate an AI-powered commit message",
+	Use:     "commit",
+	Short:   "Generate an AI-powered commit message",
+	Aliases: []string{"c"},
 	Run: func(cmd *cobra.Command, args []string) {
 		amend, _ := cmd.Flags().GetBool("amend")
 		g := mustNewGitAI()
@@ -688,8 +732,9 @@ var commitCmd = &cobra.Command{
 }
 
 var pushCmd = &cobra.Command{
-	Use:   "push",
-	Short: "Push changes and create/update a PR",
+	Use:     "push",
+	Short:   "Push changes and create/update a PR",
+	Aliases: []string{"p"},
 	Run: func(cmd *cobra.Command, args []string) {
 		g := mustNewGitAI()
 		g.Push()
@@ -697,33 +742,25 @@ var pushCmd = &cobra.Command{
 }
 
 var stashCmd = &cobra.Command{
-	Use:   "stash",
-	Short: "Stash changes with an AI-generated message",
+	Use:     "stash",
+	Short:   "Stash changes with an AI-generated message",
+	Aliases: []string{"s"},
 	Run: func(cmd *cobra.Command, args []string) {
 		g := mustNewGitAI()
 		g.Stash()
 	},
 }
 
-var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show Git status",
-	Run: func(cmd *cobra.Command, args []string) {
-		g := mustNewGitAI()
-		g.ShowStatus()
-	},
-}
-
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
+	rootCmd.PersistentFlags().BoolP("verbose", "V", false, "Enable verbose output")
 	_ = viper.BindPFlag("VERBOSE", rootCmd.PersistentFlags().Lookup("verbose"))
 
 	commitCmd.Flags().Bool("amend", false, "Amend the last commit")
 	_ = viper.BindPFlag("AMEND", commitCmd.Flags().Lookup("amend"))
 
-	rootCmd.AddCommand(commitCmd, pushCmd, stashCmd, statusCmd)
+	rootCmd.AddCommand(versionCmd, commitCmd, pushCmd, stashCmd)
 }
 
 func initConfig() {
