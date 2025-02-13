@@ -42,6 +42,10 @@ gh auth login
 
 ## 💫 Usage
 
+![Example GIF file generated with agg](.github/demo.gif)
+> `agg` didn't supported emojis when I generated the giff but, in real action you'll see them
+
+
 | Command | Description | Example |
 |---------|-------------|---------|
 | `gai commit` | Generate AI-powered commit message | `gai commit -- --amend` |
