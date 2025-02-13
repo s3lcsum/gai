@@ -158,39 +158,52 @@ func streamOutput(cmd *exec.Cmd) (string, error) {
 		return "", err
 	}
 
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		return "", err
-	}
-
-	// Create a buffer to store the complete output
-	var outputBuffer bytes.Buffer
+	// Create buffers for storing complete output
+	var stdoutBuffer, stderrBuffer bytes.Buffer
 
 	// Create a WaitGroup to wait for both goroutines
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Function to handle output stream
-	streamHandler := func(reader io.Reader, writer io.Writer) {
+	// Function to handle a stream and write to both console and buffer
+	handleStream := func(reader io.Reader, writer *os.File, buffer *bytes.Buffer) {
 		defer wg.Done()
 		scanner := bufio.NewScanner(reader)
 		for scanner.Scan() {
 			line := scanner.Text()
 			fmt.Fprintln(writer, line)
-			outputBuffer.WriteString(line + "\n")
+			buffer.WriteString(line + "\n")
 		}
 	}
 
+	// Start the command before starting the output handling
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
 	// Start goroutines for stdout and stderr
-	go streamHandler(stdoutPipe, os.Stdout)
-	go streamHandler(stderrPipe, os.Stderr)
+	go handleStream(stdoutPipe, os.Stdout, &stdoutBuffer)
+	go handleStream(stderrPipe, os.Stderr, &stderrBuffer)
 
 	// Wait for output processing to complete
 	wg.Wait()
 
 	// Wait for the command to complete
 	err = cmd.Wait()
-	return strings.TrimSpace(outputBuffer.String()), err
+
+	// Combine stdout and stderr, maintaining order but separating them
+	var combinedOutput bytes.Buffer
+	if stdoutBuffer.Len() > 0 {
+		combinedOutput.Write(stdoutBuffer.Bytes())
+	}
+	if stderrBuffer.Len() > 0 {
+		if stdoutBuffer.Len() > 0 {
+			combinedOutput.WriteString("\n")
+		}
+		combinedOutput.Write(stderrBuffer.Bytes())
+	}
+
+	return strings.TrimSpace(combinedOutput.String()), err
 }
 
 func runCmd(name string, args ...string) (string, error) {
