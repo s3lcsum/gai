@@ -261,7 +261,7 @@ func (g *GitAI) editContentInEditor(initialContent string) (string, bool) {
 		editor = os.Getenv("VISUAL")
 	}
 	if editor == "" {
-		editor = "vim"
+		editor = "nano"
 	}
 
 	logMessage(color.FgBlue, fmt.Sprintf("✍️ Opening %s editor for final review...", color.New(color.Bold).Sprint(editor)))
