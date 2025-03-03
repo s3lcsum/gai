@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,15 +18,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/briandowns/spinner"
+	"github.com/andygrunwald/go-jira"
 	"github.com/fatih/color"
 	"github.com/sashabaranov/go-openai"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-const Version = "1.0.4"
+// Version is the current version of this CLI.
+const Version = "1.1.0"
 
+// -- Embed default templates
+//
 //go:embed templates/systemInstructions.md
 var embeddedSystemInstructions string
 
@@ -41,30 +45,37 @@ var embeddedCommitFormattingInstructions string
 //go:embed templates/asciiHeader.txt
 var ASCIIHeader string
 
-func logDebug(msg string) {
-	if viper.GetBool("VERBOSE") {
-		color.New(color.FgMagenta).Fprintf(os.Stderr, "🔬 %s\n", msg)
-	}
-}
-
-func logMessage(c color.Attribute, msg string) {
-	color.New(c).Fprintln(os.Stderr, msg)
-}
-
-func logError(msg string) {
-	color.New(color.FgRed).Fprintf(os.Stderr, "❌ %s\n", msg)
-}
-
+// GitAIException wraps internal errors for clarity.
 type GitAIException struct{ msg string }
 
 func (e GitAIException) Error() string { return e.msg }
 
+// logWithLevel is a unified logging function with optional verbosity control.
+func logWithLevel(level string, c color.Attribute, msg string) {
+	level = strings.ToUpper(level)
+	if level == "DEBUG" && !viper.GetBool("VERBOSE") {
+		return
+	}
+	color.New(c).Fprintf(os.Stderr, "[%s] %s\n", level, msg)
+}
+
+func logDebug(msg string) {
+	logWithLevel("debug", color.FgMagenta, msg)
+}
+
+func logMessage(c color.Attribute, msg string) {
+	logWithLevel("info", c, msg)
+}
+
+func logError(msg string) {
+	logWithLevel("error", color.FgRed, msg)
+}
+
+// GitOperations encapsulates direct interactions with the git CLI.
 type GitOperations struct{}
 
 func (g *GitOperations) GetDiff(staged bool) (string, error) {
-	logDebug(fmt.Sprintf("Fetching %s diff (git diff %s)",
-		map[bool]string{true: "staged", false: "unstaged"}[staged],
-		map[bool]string{true: "--cached", false: ""}[staged]))
+	logDebug(fmt.Sprintf("Fetching %s diff...", map[bool]string{true: "staged", false: "unstaged"}[staged]))
 	args := []string{"diff"}
 	if staged {
 		args = append(args, "--cached")
@@ -95,7 +106,6 @@ func (g *GitOperations) Fetch(remote, branch string) error {
 	logMessage(color.FgCyan, fmt.Sprintf("🔄 Fetching latest from %s/%s...", remote, branch))
 	_, err := runCmd("git", "fetch", remote, branch)
 	if err != nil {
-		logError(fmt.Sprintf("Failed to fetch from %s/%s: %v", remote, branch, err))
 		return fmt.Errorf("failed to fetch from %s/%s: %w", remote, branch, err)
 	}
 	logMessage(color.FgGreen, fmt.Sprintf("✅ Successfully fetched latest from %s/%s.", remote, branch))
@@ -147,8 +157,8 @@ func (g *GitOperations) HasCommitsToPush(mainBranch, currentBranch string) (bool
 	return strings.TrimSpace(commitMsgs) != "", nil
 }
 
+// streamOutput streams stdout and stderr from an exec.Cmd in real time (for push/commit/stash).
 func streamOutput(cmd *exec.Cmd) (string, error) {
-	// Create pipes for stdout and stderr
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
@@ -158,14 +168,10 @@ func streamOutput(cmd *exec.Cmd) (string, error) {
 		return "", err
 	}
 
-	// Create buffers for storing complete output
 	var stdoutBuffer, stderrBuffer bytes.Buffer
-
-	// Create a WaitGroup to wait for both goroutines
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Function to handle a stream and write to both console and buffer
 	handleStream := func(reader io.Reader, writer *os.File, buffer *bytes.Buffer) {
 		defer wg.Done()
 		scanner := bufio.NewScanner(reader)
@@ -176,22 +182,16 @@ func streamOutput(cmd *exec.Cmd) (string, error) {
 		}
 	}
 
-	// Start the command before starting the output handling
 	if err := cmd.Start(); err != nil {
 		return "", err
 	}
 
-	// Start goroutines for stdout and stderr
 	go handleStream(stdoutPipe, os.Stdout, &stdoutBuffer)
 	go handleStream(stderrPipe, os.Stderr, &stderrBuffer)
 
-	// Wait for output processing to complete
 	wg.Wait()
-
-	// Wait for the command to complete
 	err = cmd.Wait()
 
-	// Combine stdout and stderr, maintaining order but separating them
 	var combinedOutput bytes.Buffer
 	if stdoutBuffer.Len() > 0 {
 		combinedOutput.Write(stdoutBuffer.Bytes())
@@ -206,42 +206,26 @@ func streamOutput(cmd *exec.Cmd) (string, error) {
 	return strings.TrimSpace(combinedOutput.String()), err
 }
 
+// runCmd runs a command and streams output if it's a git push, commit, or stash.
 func runCmd(name string, args ...string) (string, error) {
 	logDebug(fmt.Sprintf("Running command: %s %v", name, args))
 	cmd := exec.Command(name, args...)
 
-	// Use real-time output for git operations
+	// Use real-time output for certain git operations
 	if name == "git" && len(args) > 0 {
 		switch args[0] {
 		case "push", "commit", "stash":
 			return streamOutput(cmd)
 		}
 	}
-
-	// For other commands, use the original behavior
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
 
-func performWithSpinner(desc string, fn func() (string, error)) (string, error) {
-	s := spinner.New(spinner.CharSets[9], 100*time.Millisecond)
-	s.Prefix = fmt.Sprintf("%s... ", desc)
-	s.Start()
-	defer s.Stop()
-	return fn()
-}
-
-func executeCommandWithCheck(name string, args ...string) {
-	logDebug(fmt.Sprintf("executeCommandWithCheck: %s %v", name, args))
-	out, err := runCmd(name, args...)
-	if err != nil {
-		logError(fmt.Sprintf("Command failed: %s\nOutput: %s", err, out))
-		os.Exit(1)
-	}
-}
-
-func buildInputData(ticketNumber, branchName, prTitle, commits, diff string) string {
+// buildInputData organizes data for the AI prompt.
+func buildInputData(ticketNumber string, branchName string, prTitle string, commits string, diff string, jiraData string) string {
 	return fmt.Sprintf(`INPUT:
+JIRA DATA: %s
 TICKET NUMBER: %s
 BRANCH NAME:   %s
 PULL REQUEST TITLE: %s
@@ -249,37 +233,32 @@ COMMIT MESSAGES LIST:
 %s
 GIT DIFFERENCE TO HEAD:
 %s
-`, ticketNumber, branchName, prTitle, commits, diff)
+`, jiraData, ticketNumber, branchName, prTitle, commits, diff)
 }
 
+// GitAI aggregates AI-based logic & requires a GitOperations instance plus an OpenAI client.
 type GitAI struct {
 	gitOps       *GitOperations
 	openAIClient *openai.Client
 }
 
+// GenerateMessage calls OpenAI with a 60-second timeout, returning the best AI choice.
 func (g *GitAI) GenerateMessage(systemInstructions, userInstructions, inputData string) (string, error) {
-	logDebug("Preparing OpenAI request")
-	var resp openai.ChatCompletionResponse
-	_, err := performWithSpinner("🤖 Generating AI message", func() (string, error) {
-		r, e := g.openAIClient.CreateChatCompletion(
-			context.Background(),
-			openai.ChatCompletionRequest{
-				Model:       viper.GetString("OPENAI_MODEL"),
-				MaxTokens:   viper.GetInt("OPENAI_MAX_TOKENS"),
-				Temperature: float32(viper.GetFloat64("OPENAI_TEMPERATURE")),
-				TopP:        float32(viper.GetFloat64("OPENAI_TOP_P")),
-				Messages: []openai.ChatCompletionMessage{
-					{Role: openai.ChatMessageRoleSystem, Content: systemInstructions},
-					{Role: openai.ChatMessageRoleUser, Content: userInstructions},
-					{Role: openai.ChatMessageRoleUser, Content: inputData},
-				},
-			},
-		)
-		if e != nil {
-			return "", e
-		}
-		resp = r
-		return "", nil
+	logDebug("Preparing OpenAI request (no spinner)")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	resp, err := g.openAIClient.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model:       viper.GetString("OPENAI_MODEL"),
+		MaxTokens:   viper.GetInt("OPENAI_MAX_TOKENS"),
+		Temperature: float32(viper.GetFloat64("OPENAI_TEMPERATURE")),
+		TopP:        float32(viper.GetFloat64("OPENAI_TOP_P")),
+		Messages: []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleSystem, Content: systemInstructions},
+			{Role: openai.ChatMessageRoleUser, Content: userInstructions},
+			{Role: openai.ChatMessageRoleUser, Content: inputData},
+		},
 	})
 	if err != nil {
 		logError(fmt.Sprintf("OpenAI API request failed: %s", err.Error()))
@@ -289,10 +268,12 @@ func (g *GitAI) GenerateMessage(systemInstructions, userInstructions, inputData 
 		logError("Received empty message from OpenAI")
 		return "", GitAIException{"No response from GPT"}
 	}
+
 	logDebug("AI message generated successfully")
 	return resp.Choices[0].Message.Content, nil
 }
 
+// CheckRepoPermissions ensures the user has write permissions to the repository.
 func (g *GitAI) CheckRepoPermissions() error {
 	logDebug("Checking repository permissions via gh CLI")
 	out, err := runCmd("gh", "repo", "view", "--json", "viewerPermission")
@@ -315,6 +296,70 @@ func (g *GitAI) CheckRepoPermissions() error {
 		}
 	}
 }
+
+// getJiraDetails queries Jira (if credentials are present) for the specified ticket.
+func (g *GitAI) getJiraDetails(ticketID string) string {
+	apiKey := viper.GetString("JIRA_API_KEY")
+	baseURL := viper.GetString("JIRA_BASE_URL")
+	jiraUsername := viper.GetString("JIRA_USERNAME")
+
+	if apiKey == "" || baseURL == "" || jiraUsername == "" {
+		logDebug("Jira credentials not set. Skipping Jira lookup.")
+		return ""
+	}
+
+	tp := jira.BasicAuthTransport{
+		Username:  jiraUsername,
+		Password:  apiKey,
+		Transport: http.DefaultTransport,
+	}
+
+	client, err := jira.NewClient(tp.Client(), baseURL)
+	if err != nil {
+		logError(fmt.Sprintf("Failed to create Jira client: %s", err.Error()))
+		return ""
+	}
+
+	issue, _, err := client.Issue.Get(ticketID, nil)
+	if err != nil {
+		logError(fmt.Sprintf("Failed to fetch Jira issue %s: %s", ticketID, err.Error()))
+		return ""
+	}
+
+	summary := issue.Fields.Summary
+	description := issue.Fields.Description
+
+	var relatedIssues []string
+	for _, link := range issue.Fields.IssueLinks {
+		if link.OutwardIssue != nil {
+			relatedIssues = append(relatedIssues,
+				fmt.Sprintf("%s (%s)",
+					link.OutwardIssue.Key,
+					link.OutwardIssue.Fields.Summary,
+				),
+			)
+		}
+		if link.InwardIssue != nil {
+			relatedIssues = append(relatedIssues,
+				fmt.Sprintf("%s (%s)",
+					link.InwardIssue.Key,
+					link.InwardIssue.Fields.Summary,
+				),
+			)
+		}
+	}
+
+	return fmt.Sprintf(`JIRA ISSUE DATA:
+ - TICKET ID: %s
+ - TICKET SUMMARY: %s
+ - TICKET DESCRIPTION: %s
+ - TICKET RELATIONS: %v
+
+`, ticketID, summary, description, relatedIssues)
+}
+
+// editContentInEditor opens a temporary file in the user's editor with AI-generated content,
+// then checks if it was truly saved by comparing mod times.
 func (g *GitAI) editContentInEditor(initialContent string) (string, bool) {
 	tmpFile, err := ioutil.TempFile("", "gai-*.txt")
 	if err != nil {
@@ -329,6 +374,10 @@ func (g *GitAI) editContentInEditor(initialContent string) (string, bool) {
 	}
 	tmpFile.Close()
 
+	// Get file mod time before opening editor
+	infoBefore, _ := os.Stat(tmpFile.Name())
+	modTimeBefore := infoBefore.ModTime()
+
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = os.Getenv("VISUAL")
@@ -342,8 +391,18 @@ func (g *GitAI) editContentInEditor(initialContent string) (string, bool) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
 	if err := cmd.Run(); err != nil {
 		logError(fmt.Sprintf("Failed to launch %s: %s", editor, err.Error()))
+		return "", false
+	}
+
+	infoAfter, _ := os.Stat(tmpFile.Name())
+	modTimeAfter := infoAfter.ModTime()
+
+	// If user did not save (file mod time didn't change), we treat it as "no changes => cancel"
+	if !modTimeAfter.After(modTimeBefore) {
+		logMessage(color.FgYellow, "⚠️ Editor exited without saving. Canceling operation.")
 		return "", false
 	}
 
@@ -353,53 +412,69 @@ func (g *GitAI) editContentInEditor(initialContent string) (string, bool) {
 		return "", false
 	}
 
-	if strings.TrimSpace(string(finalContent)) == "" {
-		logMessage(color.FgYellow, "⚠️ No changes saved in the editor")
-		return string(finalContent), false
+	trimmedContent := strings.TrimSpace(string(finalContent))
+	if trimmedContent == "" {
+		logMessage(color.FgYellow, "⚠️ File is empty after save. Canceling operation.")
+		return "", false
 	}
 
+	// If content is valid, return it
 	logDebug("User saved new content. Displaying below.")
 	fmt.Println()
 	color.New(color.Bold).Println(string(finalContent))
-
 	return string(finalContent), true
 }
 
+// generateDiffBasedMessage fetches the diff & optional Jira details, then calls the AI for a message.
 func (g *GitAI) generateDiffBasedMessage(staged bool) (string, bool) {
-	logDebug("Gathering diff for AI-based message")
+	logDebug("Gathering diff for AI-based message...")
 	diff, _ := g.gitOps.GetDiff(staged)
-	userData := buildInputData("", "", "", "", diff)
-	logDebug("Generating message with AI based on diff")
-	aiOutput, err := g.GenerateMessage(embeddedSystemInstructions, embeddedCommitFormattingInstructions, userData)
+	currentBranch, _ := g.gitOps.GetCurrentBranch()
+	ticketNumber := g.detectTicketNumber(currentBranch)
+
+	var jiraInfo string
+	if ticketNumber != "NO-TICKET" {
+		jiraInfo = g.getJiraDetails(ticketNumber)
+	}
+	userData := buildInputData(ticketNumber, currentBranch, "", "", diff, jiraInfo)
+
+	aiOutput, err := g.GenerateMessage(
+		embeddedSystemInstructions,
+		embeddedCommitFormattingInstructions,
+		userData,
+	)
 	if err != nil {
 		logError(fmt.Sprintf("OpenAI error: %s", err.Error()))
 		return "", false
 	}
-	logMessage(color.FgCyan, "🔍 Review AI-generated message (Vim will open)...")
+
+	logMessage(color.FgCyan, "🔍 Review AI-generated message (editor will open)...")
 	edited, saved := g.editContentInEditor(aiOutput)
 	return edited, saved
 }
 
+// Commit auto-generates a commit message, opens the editor for review, and commits if user saved.
 func (g *GitAI) Commit(extraArgs []string) error {
 	logMessage(color.FgBlue, "📦 Starting commit process...")
+
 	hasChanges, err := g.gitOps.HasChanges()
 	if err != nil {
-		logError(fmt.Sprintf("Failed to check for changes: %s", err.Error()))
 		return err
 	}
 	if !hasChanges {
 		logMessage(color.FgYellow, "ℹ️ Nothing to commit. Exiting.")
 		return nil
 	}
+
 	if err := g.stageChangesIfNeeded(); err != nil {
 		return err
 	}
+
 	finalMessage, ok := g.generateDiffBasedMessage(true)
 	if !ok {
 		logMessage(color.FgYellow, "🚫 Commit canceled by user.")
 		return nil
 	}
-	logDebug("Committing changes with final message")
 	return g.gitOps.Commit(finalMessage, extraArgs)
 }
 
@@ -410,13 +485,10 @@ func (g *GitAI) stageChangesIfNeeded() error {
 		return nil
 	}
 	logMessage(color.FgCyan, "🗂️ No changes staged. Automatically staging all...")
-	if err := g.gitOps.StageAllChanges(); err != nil {
-		logError(fmt.Sprintf("Failed to stage changes: %s", err.Error()))
-		return err
-	}
-	return nil
+	return g.gitOps.StageAllChanges()
 }
 
+// Stash auto-generates a stash message, opens the editor for review, and stashes if user saved.
 func (g *GitAI) Stash(extraArgs []string) error {
 	logMessage(color.FgGreen, "💾 Stashing changes with AI-generated message...")
 	message, ok := g.generateDiffBasedMessage(false)
@@ -428,48 +500,46 @@ func (g *GitAI) Stash(extraArgs []string) error {
 	logDebug(fmt.Sprintf("Executing command: git %s", strings.Join(stashArgs, " ")))
 	out, err := runCmd("git", stashArgs...)
 	if err != nil {
-		logError(fmt.Sprintf("Failed to stash changes: %s\nOutput: %s", err.Error(), out))
-		return fmt.Errorf("failed to stash changes: %w", err)
+		return fmt.Errorf("failed to stash changes: %w\nOutput: %s", err, out)
 	}
 	logMessage(color.FgGreen, "🗄️ Changes stashed successfully!")
 	return nil
 }
 
+// Push will ensure commits are present, push to remote, then create or update a PR.
 func (g *GitAI) Push(extraArgs []string) error {
 	logMessage(color.FgBlue, "🔄 Preparing to push changes...")
 	currentBranch, err := g.gitOps.GetCurrentBranch()
 	if err != nil {
-		logError(fmt.Sprintf("Could not get current branch: %s", err.Error()))
 		return err
 	}
-	logDebug(fmt.Sprintf("Current branch: %s", currentBranch))
+
 	hasCommits, err := g.gitOps.HasCommitsToPush(viper.GetString("MAIN_BRANCH"), currentBranch)
 	if err != nil {
-		logError(fmt.Sprintf("Failed to check for commits to push: %s", err.Error()))
 		return err
 	}
 	if !hasCommits {
 		logMessage(color.FgYellow, "ℹ️ Nothing to push. Exiting.")
 		return nil
 	}
+
 	logMessage(color.FgBlue, "⬆️ Pushing changes to remote...")
 	if err := g.pushChanges(extraArgs); err != nil {
-		logError(err.Error())
 		return err
 	}
-	logDebug("Checking for existing PR...")
+
 	prNumber, err := g.getExistingPRNumber(currentBranch)
 	if err != nil {
-		logError(err.Error())
 		return err
 	}
+
 	commitMsgs, _ := g.gitOps.GetCommitMessages(viper.GetString("MAIN_BRANCH"), currentBranch)
 	diff, _ := g.gitOps.GetDiff(false)
 	ticketNumber := g.detectTicketNumber(currentBranch)
+
 	if prNumber != "" {
 		logMessage(color.FgCyan, fmt.Sprintf("🔄 Pull request #%s found. Updating body...", color.New(color.Bold).Sprint(prNumber)))
 		if err := g.updatePRBody(prNumber, currentBranch, commitMsgs, diff, ticketNumber); err != nil {
-			logError(err.Error())
 			return err
 		}
 	} else {
@@ -477,6 +547,7 @@ func (g *GitAI) Push(extraArgs []string) error {
 		g.createNewPR(currentBranch, commitMsgs, diff, ticketNumber)
 		prNumber, _ = g.getExistingPRNumber(currentBranch)
 	}
+
 	g.openPRInBrowser(prNumber)
 	return nil
 }
@@ -488,12 +559,12 @@ func (g *GitAI) pushChanges(extraArgs []string) error {
 	}
 	currentBranch, err := g.gitOps.GetCurrentBranch()
 	if err != nil {
-		return fmt.Errorf("failed to get current branch: %w", err)
+		return err
 	}
-	logDebug(fmt.Sprintf("Current branch: %s", currentBranch))
 	return g.gitOps.Push(currentBranch, "origin", extraArgs)
 }
 
+// getExistingPRNumber returns the PR number for the given branch, if any.
 func (g *GitAI) getExistingPRNumber(branch string) (string, error) {
 	logDebug(fmt.Sprintf("Listing PRs for branch %s", branch))
 	out, err := runCmd("gh", "pr", "list", "--head", branch, "--json", "number")
@@ -512,18 +583,20 @@ func (g *GitAI) getExistingPRNumber(branch string) (string, error) {
 	return "", nil
 }
 
+// updatePRBody regenerates a PR body with AI, opens it in the editor, and updates the PR if saved.
 func (g *GitAI) updatePRBody(prNumber, branch, commitMsgs, diff, ticketNumber string) error {
-	logDebug("Building input data for PR body update")
-	prBodyInput := buildInputData(ticketNumber, branch, "", commitMsgs, diff)
-	logDebug("Generating new PR body with AI")
+	jiraData := g.getJiraDetails(ticketNumber)
+	prBodyInput := buildInputData(ticketNumber, branch, "", commitMsgs, diff, jiraData)
+
 	prBodyAI, err := g.GenerateMessage(embeddedSystemInstructions, embeddedPRBodyFormattingInstructions, prBodyInput)
 	if err != nil {
 		return fmt.Errorf("failed generating PR body: %w", err)
 	}
 	editedBody, savedBody := g.editContentInEditor(prBodyAI)
 	if !savedBody {
-		return fmt.Errorf("PR update canceled")
+		return fmt.Errorf("PR update canceled by user (no save)")
 	}
+
 	logMessage(color.FgBlue, "📝 Updating PR on GitHub...")
 	out, createErr := runCmd("gh", "pr", "edit", prNumber, "--body", editedBody)
 	if createErr != nil {
@@ -533,6 +606,7 @@ func (g *GitAI) updatePRBody(prNumber, branch, commitMsgs, diff, ticketNumber st
 	return nil
 }
 
+// openPRInBrowser attempts to open the PR in a browser, if a PR exists.
 func (g *GitAI) openPRInBrowser(prNumber string) {
 	if prNumber == "" {
 		logMessage(color.FgYellow, "⚠️ No PR number to open in browser.")
@@ -542,6 +616,7 @@ func (g *GitAI) openPRInBrowser(prNumber string) {
 	runCmd("gh", "pr", "view", prNumber, "--web")
 }
 
+// detectTicketNumber attempts to parse a JIRA-like ticket from the branch name.
 func (g *GitAI) detectTicketNumber(branch string) string {
 	logDebug(fmt.Sprintf("Detecting JIRA ticket pattern in branch name: %s", branch))
 	re := regexp.MustCompile(`[A-Z]+-\d+`)
@@ -552,9 +627,11 @@ func (g *GitAI) detectTicketNumber(branch string) string {
 	return "NO-TICKET"
 }
 
+// createNewPR generates a new PR title & body, opens them for editing, then creates a draft PR on GitHub.
 func (g *GitAI) createNewPR(branch, commitMsgs, diff, ticketNumber string) {
-	logDebug("Generating PR title")
-	prTitleInput := buildInputData(ticketNumber, branch, "", commitMsgs, diff)
+	jiraData := g.getJiraDetails(ticketNumber)
+	prTitleInput := buildInputData(ticketNumber, branch, "", commitMsgs, diff, jiraData)
+
 	prTitleAI, err := g.GenerateMessage(embeddedSystemInstructions, embeddedPRTitleFormattingInstructions, prTitleInput)
 	if err != nil {
 		logError(fmt.Sprintf("Failed to generate PR title: %s", err.Error()))
@@ -569,8 +646,8 @@ func (g *GitAI) createNewPR(branch, commitMsgs, diff, ticketNumber string) {
 		logMessage(color.FgYellow, "🚫 PR creation canceled (no save on title).")
 		return
 	}
-	logDebug("Generating PR body")
-	prBodyInput := buildInputData(ticketNumber, branch, editedTitle, commitMsgs, diff)
+
+	prBodyInput := buildInputData(ticketNumber, branch, editedTitle, commitMsgs, diff, jiraData)
 	prBodyAI, err := g.GenerateMessage(embeddedSystemInstructions, embeddedPRBodyFormattingInstructions, prBodyInput)
 	if err != nil {
 		logError(fmt.Sprintf("Failed to generate PR body: %s", err.Error()))
@@ -581,6 +658,7 @@ func (g *GitAI) createNewPR(branch, commitMsgs, diff, ticketNumber string) {
 		logMessage(color.FgYellow, "🚫 PR creation canceled (no save on body).")
 		return
 	}
+
 	logMessage(color.FgGreen, "🛠️ Creating a draft Pull Request on GitHub...")
 	out, createErr := runCmd("gh", "pr", "create", "--draft", "--title", editedTitle, "--body", editedBody)
 	if createErr != nil {
@@ -589,6 +667,10 @@ func (g *GitAI) createNewPR(branch, commitMsgs, diff, ticketNumber string) {
 	}
 	logMessage(color.FgGreen, "🎉 Pull Request created successfully!")
 }
+
+// ------------------------------------------------------------------
+// Cobra commands & CLI entry point
+// ------------------------------------------------------------------
 
 var (
 	systemInstructionsContent     string
@@ -636,17 +718,9 @@ var instructionsCmd = &cobra.Command{
 }
 
 var commitCmd = &cobra.Command{
-	Use:   "commit [-- git commit flags]",
-	Short: "Generate an AI-powered commit message. Pass additional git commit flags after '--'.",
-	Long: `The commit command generates an AI-powered commit message and allows you to pass additional flags directly to git commit.
-
-Usage:
-  gai commit [flags] [-- git commit flags]
-
-Examples:
-  gai commit -- --amend --force --root
-  gai commit -- -v
-`,
+	Use:     "commit [-- git commit flags]",
+	Short:   "Generate an AI-powered commit message. Pass additional git commit flags after '--'.",
+	Long:    "Generates an AI-powered commit message, opens it in your editor for review, and commits if saved.",
 	Aliases: []string{"c"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		g := mustNewGitAI()
@@ -657,10 +731,7 @@ Examples:
 var pushCmd = &cobra.Command{
 	Use:   "push [-- git push flags]",
 	Short: "Push changes and create/update a PR. Pass additional git push flags after '--'.",
-	Long: `The push command pushes your changes to the remote repository and manages pull requests.
-
-Usage:
-  gai push [flags] [-- git push flags]
+	Long: `Pushes your changes to the remote repository, then creates or updates a PR if commits exist.
 
 Examples:
   gai push -- --force
@@ -674,23 +745,14 @@ Examples:
 			logError(err.Error())
 			return err
 		}
-
 		return g.Push(args)
 	},
 }
 
 var stashCmd = &cobra.Command{
-	Use:   "stash [-- git stash flags]",
-	Short: "Stash changes with an AI-generated message. Pass additional git stash flags after '--'.",
-	Long: `The stash command stashes your changes with an AI-generated message and allows you to pass additional flags directly to git stash.
-
-Usage:
-  gai stash [flags] [-- git stash flags]
-
-Examples:
-  gai stash -- --keep-index
-  gai stash -- -u
-`,
+	Use:     "stash [-- git stash flags]",
+	Short:   "Stash changes with an AI-generated message. Pass additional git stash flags after '--'.",
+	Long:    "Generates an AI-based stash message, opens it in your editor for review, and stashes if saved.",
 	Aliases: []string{"s"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		g := mustNewGitAI()
@@ -702,9 +764,11 @@ func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().BoolP("verbose", "V", false, "Enable verbose output")
 	_ = viper.BindPFlag("VERBOSE", rootCmd.PersistentFlags().Lookup("verbose"))
+
 	rootCmd.AddCommand(versionCmd, instructionsCmd, commitCmd, pushCmd, stashCmd)
 }
 
+// initConfig loads environment variables and prompt overrides from user config directories.
 func initConfig() {
 	viper.AutomaticEnv()
 	configDir := viper.GetString("GAI_CONFIG_DIR")
@@ -723,12 +787,16 @@ func initConfig() {
 
 	viper.SetDefault("OPENAI_MODEL", "gpt-4o-mini")
 	viper.SetDefault("OPENAI_MAX_TOKENS", 16384)
-	viper.SetDefault("OPENAI_TEMPERATURE", 0.0)
-	viper.SetDefault("OPENAI_TOP_P", 1.0)
+	viper.SetDefault("OPENAI_TEMPERATURE", 0.8)
+	viper.SetDefault("OPENAI_TOP_P", 0.9)
 	viper.SetDefault("MAIN_BRANCH", "main")
 	viper.SetDefault("VERBOSE", false)
+	viper.SetDefault("JIRA_BASE_URL", "")
+	viper.SetDefault("JIRA_USERNAME", "")
+	viper.SetDefault("JIRA_API_KEY", "")
 }
 
+// loadPrompt reads a file from path or defaults to embedded content if not found.
 func loadPrompt(path, defaultContent string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -739,10 +807,11 @@ func loadPrompt(path, defaultContent string) string {
 		}
 		return defaultContent
 	}
-	logMessage(color.FgCyan, fmt.Sprintf("🔍 Loaded prompt from %s", color.New(color.Bold).Sprint(path)))
+	logMessage(color.FgCyan, fmt.Sprintf("🔍 Loaded prompt from %s .", color.New(color.Bold).Sprint(path)))
 	return string(data)
 }
 
+// mustNewGitAI creates a GitAI or exits on fatal error.
 func mustNewGitAI() *GitAI {
 	apiKey := viper.GetString("OPENAI_API_KEY")
 	if apiKey == "" {
@@ -761,6 +830,7 @@ func mustNewGitAI() *GitAI {
 	}
 }
 
+// checkRequirements ensures user has Git, GitHub CLI, and is authenticated via gh.
 func checkRequirements() error {
 	logMessage(color.FgCyan, "🔎 Checking system requirements...")
 	if _, err := exec.LookPath("git"); err != nil {
@@ -774,34 +844,11 @@ func checkRequirements() error {
 		logDebug(out)
 		return GitAIException{"GitHub CLI not authenticated"}
 	}
-	// Removed checkRepoPermissions from here
 	logMessage(color.FgGreen, "✅ All requirements satisfied!")
 	return nil
 }
 
-func checkRepoPermissions() error {
-	logDebug("Checking repository permissions via gh CLI")
-	out, err := runCmd("gh", "repo", "view", "--json", "viewerPermission")
-	if err != nil {
-		logDebug(out)
-		return GitAIException{"Cannot check repository permissions."}
-	}
-	var resp struct {
-		ViewerPermission string `json:"viewerPermission"`
-	}
-	if unmarshalErr := json.Unmarshal([]byte(out), &resp); unmarshalErr != nil {
-		return GitAIException{"Cannot parse GH repo view output: " + unmarshalErr.Error()}
-	}
-	switch resp.ViewerPermission {
-	case "ADMIN", "MAINTAIN", "WRITE":
-		return nil
-	default:
-		return GitAIException{
-			"You do not have write permissions to this repository. Permission: " + resp.ViewerPermission,
-		}
-	}
-}
-
+// main is the CLI entry point.
 func main() {
 	color.New(color.FgMagenta).Printf("%s\n", ASCIIHeader)
 	if err := rootCmd.Execute(); err != nil {
